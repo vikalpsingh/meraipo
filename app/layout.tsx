@@ -1,0 +1,5 @@
+import type {Metadata} from 'next';
+import Link from 'next/link';
+import './globals.css';
+export const metadata:Metadata={title:'MeraIPO — Beyond listing day',description:'Follow IPOs from the issue to quarterly business performance.',icons:{icon:'/favicon.svg'}};
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en"><body><header className="site-header"><Link className="brand" href="/"><span className="brand-mark">m</span>mera<span>IPO</span></Link><nav aria-label="Main navigation"><Link href="/">IPO Now</Link><Link href="/tracker">IPO Tracker</Link><Link href="/company/prava-tech">Company Journey</Link></nav><span className="header-label">INDIA · IPO RESEARCH</span></header><div className="demo-banner">SAMPLE EDITION <span>Fictional companies and illustrative figures. Live feeds are not connected.</span></div>{children}<footer><Link className="brand" href="/">mera<span>IPO</span></Link><p>From public issue to lasting performance.</p><span>Research context, not investment advice. GMP is unofficial.</span></footer></body></html>}
