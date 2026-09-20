@@ -45,3 +45,19 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+
+# Modular application artifacts
+node_modules/
+.next/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+test-results/
+playwright-report/
+!/.env.example

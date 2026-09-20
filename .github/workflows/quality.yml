@@ -1,0 +1,48 @@
+name: MeraIPO release checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test-only-ci
+          POSTGRES_DB: meraipo_test
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U test -d meraipo_test" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test-only-ci@localhost:5432/meraipo_test
+      REDIS_URL: redis://localhost:6379/0
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: apps/web/package-lock.json}
+      - run: pip install -r requirements.lock && pip install --no-deps -e .
+      - run: npm ci --prefix apps/web
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: python scripts/verify.py
+      - name: Validate container images
+        run: docker compose build api web
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-test-results
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results

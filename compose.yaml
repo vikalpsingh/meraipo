@@ -1,0 +1,113 @@
+name: meraipo
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meraipo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_DB: ${POSTGRES_DB:-meraipo}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.api
+    environment: &backend
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-meraipo}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-meraipo}
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      PROVIDER_MODE: ${PROVIDER_MODE:-manual}
+      CRON_SECRET: ${CRON_SECRET:-}
+      MARKET_SCHEDULER_ENABLED: ${MARKET_SCHEDULER_ENABLED:-false}
+      MARKET_SCHEDULER_DRIVER: ${MARKET_SCHEDULER_DRIVER:-celery}
+      EXCHANGE_DIRECT_ENABLED: ${EXCHANGE_DIRECT_ENABLED:-false}
+      EXCHANGE_SOURCES_JSON: ${EXCHANGE_SOURCES_JSON:-[]}
+      MARKET_FEEDS_JSON: ${MARKET_FEEDS_JSON:-}
+      TRADING_CALENDAR_YEAR: ${TRADING_CALENDAR_YEAR:-0}
+      TRADING_HOLIDAYS: ${TRADING_HOLIDAYS:-}
+      SESSION_HOURS: ${SESSION_HOURS:-8}
+      CACHE_TTL: ${CACHE_TTL:-60}
+      GMP_TTL_HOURS: ${GMP_TTL_HOURS:-12}
+      PRICE_TTL_HOURS: ${PRICE_TTL_HOURS:-72}
+      IPO_REFRESH_MINUTES: ${IPO_REFRESH_MINUTES:-240}
+      RESULTS_REFRESH_MINUTES: ${RESULTS_REFRESH_MINUTES:-1440}
+      DOCUMENT_REFRESH_MINUTES: ${DOCUMENT_REFRESH_MINUTES:-1440}
+      GMP_REFRESH_MINUTES: ${GMP_REFRESH_MINUTES:-60}
+      EOD_HOUR_IST: ${EOD_HOUR_IST:-18}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_PATH: /app/work/documents
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.api
+    environment: *backend
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["documents:/app/work/documents"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.api
+    environment: *backend
+    command: ["celery", "-A", "apps.worker.tasks.celery", "worker", "--loglevel=INFO", "--concurrency=2"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  scheduler:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.api
+    environment: *backend
+    command: ["celery", "-A", "apps.worker.tasks.celery", "beat", "--loglevel=INFO", "--schedule=/app/work/celerybeat-schedule"]
+    volumes: ["scheduler_data:/app/work"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.web
+      args:
+        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
+        SITE_URL: ${SITE_URL:-http://localhost:3000}
+    environment:
+      API_INTERNAL_URL: http://api:8000
+      CRON_SECRET: ${CRON_SECRET:-}
+      SITE_URL: ${SITE_URL:-http://localhost:3000}
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  postgres_data:
+  redis_data:
+  documents:
+  scheduler_data:
