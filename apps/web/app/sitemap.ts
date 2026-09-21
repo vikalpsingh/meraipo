@@ -14,6 +14,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     '/privacy',
     '/terms',
     '/contact',
+    '/feedback',
   ];
   const [open, upcoming, recent] = await Promise.all(
     ['open', 'upcoming', 'recent'].map((status) => api<{ items: Company[] }>('/ipos/' + status)),

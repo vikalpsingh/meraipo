@@ -27,7 +27,7 @@ HOSTS = {
     "api.bseindia.com",
 }
 NSE_IPO = "https://www.nseindia.com/api/ipo-current-issue"
-NSE_UPCOMING = "https://www.nseindia.com/api/ipo-upcoming-issue"
+NSE_UPCOMING = "https://www.nseindia.com/api/all-upcoming-issues?category=ipo"
 
 
 def exchange_url(url):
@@ -193,8 +193,7 @@ def parse_nse_ipos(content, fetched_at, upcoming=False):
     url = NSE_UPCOMING if upcoming else NSE_IPO
     for index, row in enumerate(body):
         try:
-            if str(row.get("isBse", "")) == "1":
-                raise FeedError("BSE_IDENTIFIER_REQUIRED")
+            bse = str(row.get("isBse", "")) == "1"
             symbol, name = row["symbol"], row["companyName"]
             opened, closed = parse_date(row.get("issueStartDate")), parse_date(
                 row.get("issueEndDate")
@@ -202,20 +201,21 @@ def parse_nse_ipos(content, fetched_at, upcoming=False):
             day = fetched_at.astimezone(ZoneInfo("Asia/Kolkata")).date()
             status = (
                 "UPCOMING"
-                if upcoming or (opened and opened > day)
+                if (opened and opened > day) or (not opened and row.get("status") == "Forthcoming")
                 else "CLOSED" if closed and closed < day else "OPEN"
             )
             band = re.findall(r"\d+(?:\.\d+)?", str(row.get("issuePrice", "")).replace(",", ""))
             prices = {"price_low": band[0], "price_high": band[-1]} if 1 <= len(band) <= 2 else {}
             # Exchange-provided symbol is a mapping key, never derived from company names.
-            identity = {"nse_symbol": symbol}
+            identity = {"bse_symbol" if bse else "nse_symbol": symbol}
             issue = Issue(
                 **identity,
                 source_url=url,
                 source_timestamp=fetched_at,
                 official_status=status,
                 issue={
-                    "slug": "nse-" + re.sub(r"[^a-z0-9]+", "-", symbol.lower()).strip("-"),
+                    "slug": ("bse-" if bse else "nse-")
+                    + re.sub(r"[^a-z0-9]+", "-", symbol.lower()).strip("-"),
                     "name": name,
                     "sector": "Not classified",
                     "board": "SME" if row.get("series") in ("SME", "SM") else "Mainboard",
@@ -225,6 +225,7 @@ def parse_nse_ipos(content, fetched_at, upcoming=False):
                     "source_timestamp": fetched_at,
                     "open_date": opened,
                     "close_date": closed,
+                    **({"lot_size": int(row["lotSize"])} if row.get("lotSize") else {}),
                     **prices,
                 },
             )

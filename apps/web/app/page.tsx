@@ -137,6 +137,15 @@ export default async function Home({
         return.
       </p>
       <Message message={message.message} />
+      <aside className="panel section-heading" aria-label="Help improve MeraIPO">
+        <div>
+          <h2>What should we build next?</h2>
+          <p>Share an idea or vote for features other investors want.</p>
+        </div>
+        <Link href="/feedback" className="outline-button">
+          Share feedback
+        </Link>
+      </aside>
       <Ads items={ads.items} />
     </main>
   );

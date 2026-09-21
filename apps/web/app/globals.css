@@ -1554,3 +1554,29 @@ body:has(.company-preview[open]) {
     top: -16px;
   }
 }
+.feedback-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 2rem;
+  align-items: start;
+}
+.feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+.feedback-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.feedback-layout h3 {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 800px) {
+  .feedback-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+}

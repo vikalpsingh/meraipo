@@ -94,6 +94,12 @@ export function CompanyPreview({
           </div>
         </div>
         <h3>Who is subscribing?</h3>
+        {c.subscription?.source_disagreement && (
+          <p className="notice">
+            Exchange totals differ. NSE total is shown; each category retains its own source and
+            update time.
+          </p>
+        )}
         <p className="muted">
           100% means fully subscribed; 250% means 2.5×. This is demand, not an allotment
           probability.
@@ -110,6 +116,7 @@ export function CompanyPreview({
                 <th>Category</th>
                 <th>Subscribed</th>
                 <th>Times</th>
+                <th>Source / observed</th>
               </tr>
             </thead>
             <tbody>
@@ -127,6 +134,14 @@ export function CompanyPreview({
                     </th>
                     <td>{multiple == null ? 'Not reported' : `${number(multiple * 100)}%`}</td>
                     <td>{multiple == null ? '—' : `${number(multiple)}×`}</td>
+                    <td>
+                      {c.subscription?.categories?.[key]?.source_provider || '—'}
+                      <small className="table-subline">
+                        {c.subscription?.categories?.[key]?.observed_at
+                          ? timestamp(c.subscription.categories[key].observed_at)
+                          : ''}
+                      </small>
+                    </td>
                   </tr>
                 );
               })}

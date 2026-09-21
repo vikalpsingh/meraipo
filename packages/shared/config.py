@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     market_scheduler_enabled: bool = False
     exchange_direct_enabled: bool = False
     exchange_sources_json: str = "[]"
+    bse_ipo_issues_json: str = "[]"
     market_scheduler_driver: Literal["celery", "vercel"] = "celery"
 
     @model_validator(mode="after")

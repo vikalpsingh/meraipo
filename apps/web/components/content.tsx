@@ -71,7 +71,7 @@ export function IPOCard({ company: c }: { company: Company }) {
       </div>
       <CompanyPreview company={c} heading />
       <p>
-        {c.board} · {c.sector}
+        {c.board === 'SME' ? 'SME' : 'EQ · Mainboard'} · {c.sector}
       </p>
       <p className="dates">
         {date(c.open_date)} – {date(c.close_date)}

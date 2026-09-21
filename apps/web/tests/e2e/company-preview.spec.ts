@@ -9,6 +9,18 @@ test('company popup has subscription percentages, history and keyboard close', a
     (c: { subscription?: { multiple: number } }) => c.subscription?.multiple === 3.75,
   );
   await page.goto('/');
+  if (testInfo.project.name === 'desktop') {
+    await expect(
+      page.locator('#open').getByRole('columnheader', { name: 'Security type', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator('#open')
+        .getByRole('region', { name: 'IPO subscription overview' })
+        .getByRole('cell', { name: 'EQ', exact: true })
+        .first(),
+    ).toBeVisible();
+  }
   const trigger = page.getByRole('button', { name: company.name, exact: true });
   await trigger.click();
   const dialog = page.getByRole('dialog');

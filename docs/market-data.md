@@ -1,5 +1,7 @@
 # Market data integration and scheduler
 
+For the current direct-exchange jobs, staging-to-master flow, and 23:00 IST schedule, see [Exchange pipeline](exchange-pipeline.md). The feed contract and legacy jobs below remain available as optional integration tools.
+
 ## A. Architecture and current status
 
 The existing Next.js App Router frontend, FastAPI API, SQLAlchemy/Alembic database and Celery/Redis worker are retained. No Supabase client or duplicate company database was introduced. Vercel serves the web application from `apps/web`; the Python API and worker must run on a separate container-capable service with PostgreSQL and Redis.

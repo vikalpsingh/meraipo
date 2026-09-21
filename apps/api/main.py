@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.api import cache, schemas, security, services
 from apps.api import repository as repo
+from apps.api.feedback_routes import router as feedback_router
 from apps.api.market_routes import router as market_router
 from packages.database import models as m
 from packages.database.session import engine, get_session
@@ -43,6 +44,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(market_router, prefix="/api/v1")
+app.include_router(feedback_router, prefix="/api/v1")
 
 
 @app.middleware("http")
@@ -102,7 +104,7 @@ async def observe(request, call_next):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Cache-Control"] = (
         "no-store"
-        if "/admin" in request.url.path
+        if "/admin" in request.url.path or request.url.path.startswith("/api/v1/feedback")
         else (
             "public, max-age=30"
             if request.method == "GET"

@@ -109,7 +109,7 @@ async def match_company(db, data):
         found = await db.scalar(select(m.Company.id).where(m.Company.isin == data.isin))
         if found:
             matches.add(found)
-    for exchange, symbol in (("NSE", data.nse_symbol), ("BSE", data.bse_code)):
+    for exchange, symbol in data.exchange_identifiers():
         if symbol:
             found = await db.scalar(
                 select(m.Identifier.company_id).where(
@@ -126,6 +126,24 @@ async def match_company(db, data):
     return company
 
 
+async def remember_identifiers(db, company, data):
+    changed = False
+    for exchange, symbol in data.exchange_identifiers():
+        if symbol and not await db.scalar(
+            select(m.Identifier.id).where(
+                m.Identifier.company_id == company.id,
+                m.Identifier.exchange == exchange,
+                m.Identifier.ticker == symbol,
+            )
+        ):
+            db.add(m.Identifier(company_id=company.id, exchange=exchange, ticker=symbol))
+            changed = True
+    if data.isin and not company.isin:
+        company.isin = data.isin
+        changed = True
+    return changed
+
+
 async def ingest_record(db, kind, data, provider, authority, raw_id):
     company = await match_company(db, data)
     digest = fingerprint(data.model_dump(mode="json"))
@@ -133,6 +151,21 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
         # A provider polling timestamp is not a new financial revision.
         digest = fingerprint(data.model_dump(mode="json", exclude={"source_timestamp"}))
     if kind == "ipos":
+        if not company and data.bse_issue_id:
+            # Names only flag ambiguous candidates; they never authorize a merge.
+            possible = await db.scalar(
+                select(m.Company.id)
+                .where(func.lower(func.trim(m.Company.name)) == data.issue.name.strip().lower())
+                .limit(1)
+            )
+            if not possible and data.bse_symbol:
+                possible = await db.scalar(
+                    select(m.Identifier.company_id)
+                    .where(m.Identifier.exchange == "NSE", m.Identifier.ticker == data.bse_symbol)
+                    .limit(1)
+                )
+            if possible:
+                raise FeedError("BSE_CROSS_EXCHANGE_MAPPING_REQUIRED")
         if company:
             ipo = await db.scalar(select(m.IPO).where(m.IPO.company_id == company.id))
             if not ipo:
@@ -162,7 +195,7 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
                 ):
                     raise FeedError("SOURCE_CONFLICT")
                 if ipo.source_provider:
-                    return False
+                    return await remember_identifiers(db, company, data)
             if ipo.source_timestamp and utc(data.source_timestamp) <= utc(ipo.source_timestamp):
                 return False
             values = data.issue.model_copy(
@@ -222,15 +255,7 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
         for key in ("anchor_date", "allotment_date", "refund_date", "demat_credit_date"):
             if getattr(data, key) is not None:
                 setattr(dates, key, getattr(data, key))
-        for exchange, symbol in (("NSE", data.nse_symbol), ("BSE", data.bse_code)):
-            if symbol and not await db.scalar(
-                select(m.Identifier).where(
-                    m.Identifier.company_id == company.id,
-                    m.Identifier.exchange == exchange,
-                    m.Identifier.ticker == symbol,
-                )
-            ):
-                db.add(m.Identifier(company_id=company.id, exchange=exchange, ticker=symbol))
+        await remember_identifiers(db, company, data)
         ipo.raw_status, ipo.source_provider, ipo.source_timestamp = (
             data.official_status.upper(),
             provider,
@@ -267,6 +292,7 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
                 multiple=total.multiple if total else None,
                 observed_at=data.source_timestamp,
                 categories=categories,
+                source_exchange=authority,
                 payload_hash=value_hash,
                 source_provider=provider,
                 source_url=data.source_url,

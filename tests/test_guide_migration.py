@@ -33,3 +33,20 @@ def test_guide_migration_preserves_existing_ipo_and_matches_models(tmp_path, mon
     assert "ipo_applicant_guides" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
     engine.dispose()
+
+
+def test_subscription_source_upgrades_already_applied_exchange_migration(tmp_path, monkeypatch):
+    path = tmp_path / "existing-exchange.db"
+    monkeypatch.setattr(settings(), "database_url", f"sqlite+aiosqlite:///{path.as_posix()}")
+    config = Config("alembic.ini")
+    command.upgrade(config, "20260920_exchange_pipeline")
+    engine = create_engine(f"sqlite:///{path.as_posix()}")
+    assert "source_exchange" not in {
+        column["name"] for column in inspect(engine).get_columns("ipo_subscriptions")
+    }
+    command.upgrade(config, "head")
+    assert "source_exchange" in {
+        column["name"] for column in inspect(engine).get_columns("ipo_subscriptions")
+    }
+    command.check(config)
+    engine.dispose()

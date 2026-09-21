@@ -13,6 +13,7 @@ from apps.worker.exchange_pipeline import PIPELINE_JOBS
 from apps.worker.market import JOBS, create_run
 from packages.database import models as m
 from packages.database.session import get_session
+from packages.providers.bse_ipo import configuration as bse_configuration
 from packages.providers.exchanges import discovery_sources
 from packages.providers.market import configuration
 from packages.shared.config import settings
@@ -20,6 +21,23 @@ from packages.shared.market_freshness import freshness, next_scheduled
 
 router = APIRouter()
 ALL_JOBS = {**JOBS, **PIPELINE_JOBS}
+
+
+@router.get("/admin/market/errors")
+async def error_log(auth=Depends(admin), db=Depends(get_session)):
+    rows = (
+        await db.execute(
+            select(m.JobError, m.ImportRun.job_name, m.ImportRun.status)
+            .join(m.ImportRun, m.ImportRun.id == m.JobError.run_id)
+            .order_by(m.JobError.created_at.desc(), m.JobError.id.desc())
+            .limit(50)
+        )
+    ).all()
+    return {
+        "items": [
+            {**record(error), "job_name": job, "run_status": status} for error, job, status in rows
+        ]
+    }
 
 
 class RunRequest(Input):
@@ -40,6 +58,10 @@ async def dispatch(db, job, trigger, data):
     if trigger == "scheduled" and not settings().market_scheduler_enabled:
         raise HTTPException(503, "Enable MARKET_SCHEDULER_ENABLED after completing setup")
     params = {}
+    if job in ("sync-prices", "collect-prices") and data.to_date:
+        if data.to_date > date.today() or (data.from_date and data.from_date != data.to_date):
+            raise HTTPException(422, "Choose one non-future trading date")
+        params["trade_date"] = data.to_date.isoformat()
     if data.retry_rejected:
         if not job.startswith(("publish-", "sync-")):
             raise HTTPException(422, "Retry rejected records with a publishing job")
@@ -114,6 +136,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
     try:
         feeds = configuration(settings().market_feeds_json)
         native = discovery_sources(settings().exchange_sources_json)
+        bse_issues = bse_configuration(settings().bse_ipo_issues_json)
         config_error = None
     except Exception:
         feeds, native, config_error = (
@@ -121,6 +144,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             [],
             "Invalid provider configuration; check MARKET_FEEDS_JSON and EXCHANGE_SOURCES_JSON",
         )
+        bse_issues = []
     providers = [
         {
             "kind": kind,
@@ -142,7 +166,12 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
                     "enabled": True,
                     "credential_set": False,
                 }
-                for kind, exchange in (("ipos", "NSE"), ("prices", "NSE"), ("prices", "BSE"))
+                for kind, exchange in (
+                    ("ipos", "NSE"),
+                    ("ipos", "BSE"),
+                    ("prices", "NSE"),
+                    ("prices", "BSE"),
+                )
             ]
         )
         providers.extend(
@@ -206,6 +235,11 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         },
         "enabled": settings().market_scheduler_enabled,
         "setup": [
+            {
+                "label": "BSE category subscriptions",
+                "ready": bool(bse_issues),
+                "setting": "BSE_IPO_ISSUES_JSON · match each cumulative-demand issue ID to an exact company identifier",
+            },
             {
                 "label": "Quarterly source mapping",
                 "ready": any(s.kind == "results" and s.concepts for s in native)

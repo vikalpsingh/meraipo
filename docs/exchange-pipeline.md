@@ -1,89 +1,95 @@
-# Exchange collection and publication
+# MeraIPO exchange pipeline
 
-MeraIPO now separates downloading source data from updating the public tables. This is an end-of-day research pipeline, not a real-time quote service.
+Each scheduled job downloads into durable staging and then publishes validated records to the existing master tables **in the same worker execution**. The public UI reads those masters. Failed downloads do not erase previously published values, and a failed publishing phase leaves staging available for retry.
 
-## Schedule (Asia/Kolkata)
+## Schedule: Asia/Kolkata
 
-| Collection | Time | Publication | Time |
-| --- | --- | --- | --- |
-| `collect-ipos` | Daily 07:00 | `publish-ipos` | Daily 07:15 |
-| `collect-prices` | Trading weekdays 18:45 | `publish-prices` | Trading weekdays 19:00 |
-| `collect-results` | Friday 21:00 | `publish-results` | Friday 21:30 |
+| Job | Time IST |
+| --- | --- |
+| `sync-ipos` — IPO, subscription and configured unofficial GMP | Daily 23:00 |
+| `sync-prices` — daily NSE/BSE closing prices | Trading weekdays 23:10 |
+| `sync-results` — quarterly and annual financial filings | Friday 21:00 |
 
-Docker's Celery beat is the default scheduler. `MARKET_SCHEDULER_DRIVER=vercel` disables beat and allows the authenticated Vercel cron bridge instead. Use one scheduler owner. Legacy feed jobs remain available for manual use, under the admin advanced toggle; they are not scheduled automatically.
+23:00 supersedes the earlier 01:00 request. The price offset avoids overlapping writers; results retain the requested Friday 21:00 timing. Standalone collect/publish jobs remain available under advanced admin tools for troubleshooting.
 
-## Storage and guarantees
+## Architecture
 
-1. Download bounded source files without bypassing access restrictions. Retain raw CSV/JSON/XML and source provenance.
-2. Validate exact identifiers, timestamps, financial periods, units, and source schema. Put valid observations in `market_staging`; record rejected source records in the job error log.
-3. A separate publishing job writes existing IPO, financial, price, and GMP masters through the existing validated ingestion code. Only then invalidate the public cache. The shared database lease prevents overlapping writers.
-4. Repeated collection and publication are idempotent. Failed sources preserve previously published data. Admin shows pending/published/rejected counts and explicit retry controls for rejected staged records after mapping corrections.
+1. Bounded official downloads are retained in `data_raw_payloads` with provenance.
+2. Validated observations enter `market_staging`, deduplicated by source and content. Collection does not alter public masters.
+3. The same sync job commits staging, then publishes under the shared database writer lease. Admin counts distinguish staged and published records.
+4. Existing IPO, subscription, GMP, price and financial masters power the public API. Cache invalidation follows successful database commits.
 
-`exchange_price_history` has a unique company/date/exchange key and stores each exchange's normalized OHLCV observation. `market_prices_eod` remains the canonical public daily close: NSE first, BSE fallback. Both raw observations remain available. An official close can confirm that an existing IPO has listed after its closing date; it does not fabricate the original listing date or listing price.
+`exchange_price_history` has a unique company/date/exchange key and stores normalized OHLCV from both exchanges. `market_prices_eod` is the canonical public close: NSE preferred, BSE fallback. Official trading after an IPO's closing date can confirm listing; the original listing date and price are never invented from a later price observation.
 
-`company_subscription_days` has a unique company/date/exchange key and links to its latest intraday `ipo_subscriptions` observation. `company_subscription_details` has one row per day/category, including shares bid, shares offered, and subscription multiple. The API joins these to the company and provides daily history. A changed intraday observation updates that day's summary; a new day retains a separate summary even if the multiple is unchanged. Earlier intraday source observations remain in the history table.
+`company_subscription_days` uniquely identifies company/date/exchange and references the latest intraday snapshot. `company_subscription_details` joins category rows containing bid shares, offered shares and multiple. Intraday changes replace the day's summary; a new date retains a new daily row. The original snapshot history remains available.
 
-Percentages shown in the IPO table are subscription demand: `multiple × 100`, not category allocation quotas or allotment probabilities. Missing categories remain missing. NSE/BSE do not provide unofficial GMP; existing admin entry and separately configured unofficial feeds remain supported.
+The API takes NSE total subscription and BSE category values from the latest observed day. It retains category-level source and timestamp, never adds exchange totals, and flags disagreement greater than 0.01×. Old-day categories are not silently combined with a newer total. Displayed subscription percentage is `multiple × 100`, not an allotment probability or allocation quota. Missing values remain missing.
 
-## Source implementation and honest readiness
+## Actual source readiness
 
-- Built-in NSE current/upcoming IPO JSON parser, including total subscription when supplied. The current-issue response was inspectable during implementation; local direct requests timed out. Mirrored BSE issues without an authoritative BSE code/ISIN are rejected instead of inventing NSE identifiers.
-- Built-in NSE UDiFF ZIP and BSE UDiFF CSV/ZIP parsers. A single bulk file per exchange is filtered against tracked identifiers. Unexpected schema, dates, invalid prices, archive limits, and HTTP denials fail explicitly.
-- Native JSON discovery adapter for NSE/BSE IPO, category subscription, and financial discovery interfaces, configured with exact source field mappings rather than requiring a purchased normalized feed. It supports nested response paths, bounded pagination, date filters, and exact taxonomy concept mappings.
-- Financial discovery downloads XML only for tracked companies and skips previously processed filing ID/timestamp pairs. New filing IDs or broadcast times cause a new download. A 14-day overlapping scan catches a missed Friday. Maximum five discovery pages and twenty XBRL downloads per run; hitting a limit is reported, never declared fully complete. Rerun after a filing batch limit. An outage beyond the lookback needs an explicit historical backfill.
-- XBRL processing validates company ISIN, discrete fiscal quarters/full annual years, INR units, and reporting basis. Both consolidated and standalone can be retained; the existing UI prefers consolidated. Segment/YTD, ambiguous, unsafe XML, unsupported ratios, and unmapped taxonomy facts are rejected. Inline XBRL HTML is not supported by this parser; configure an actual XML instance download.
+- **NSE IPO:** built-in current-issue API and `/api/all-upcoming-issues?category=ipo`, verified from NSE's official `upcoming-ipo.js`. The latter contains active and forthcoming issues; lifecycle is determined by dates rather than treating every returned row as upcoming. BSE-flagged rows retain exact symbols under the separate `BSE_SYMBOL` identifier namespace and retain BSE subscription provenance through the NSE source. They are never assigned fabricated NSE tickers or numeric BSE scrip codes. Numeric BSE code/ISIN enrichment is still required for their price matching. EQ maps to Mainboard; SME maps to SME. Lot sizes are imported when supplied.
+- **NSE/BSE prices:** bounded UDiFF CSV/ZIP parsers; one file per exchange filtered by exact tracked identifiers. Wrong dates, malformed prices, schema changes, denied requests and archive limits produce explicit failures.
+- **BSE categories:** cumulative-demand HTML adapter with explicit BSE issue ID to company identifier mapping. Requires a cumulative-demand page, offered/bid-share columns and coherent ratios. Synthetic HTML tests pass; live page access was denied and actual markup compatibility remains unverified.
+- **Quarterly results:** native JSON discovery and strict XBRL processing are implemented and fixture-tested. Current NSE/BSE discovery field and taxonomy mappings still require verification. No working native financial source is configured by default.
+- **GMP:** exchanges do not publish it. Existing admin entry and configured unofficial feeds are supported. No InvestorGain scraper or automatic GMP source has been claimed or configured.
 
-**Not yet live-validated:** BSE IPO/category discovery mappings and current NSE/BSE integrated-financial taxonomy mappings. Exchange requests were timing out (NSE) or returning access-denied responses (BSE) from this machine. No successful exchange import should be inferred from passing fixture tests. Do not enable a guessed mapping. Admin explicitly shows quarterly source mapping as incomplete until configured.
+Initial host requests timed out on NSE and were denied by BSE. The subsequent Docker verification on September 20, 2026 reached NSE successfully: two IPO masters and two subscription masters were published, with all four staging records marked `PUBLISHED`. An existing-database upgrade defect was fixed by the forward `20260920_subscription_source` migration, and retained subscriptions were successfully retried. Three mirrored BSE issues were rejected for missing authoritative identifiers; the upcoming-issues endpoint returned 404.
 
-## Docker configuration
+The September 18 price replay downloaded and parsed NSE's file but found no prices for the two tracked IPOs; BSE's file returned 404. No daily prices were published. `sync-results` reported `SOURCE_CONFIGURATION_REQUIRED` and published nothing. These partial results are visible in admin. Access controls are not bypassed. The subsequent IPO connector correction addresses the old upcoming-URL and BSE-symbol rejections; previous error records remain as historical diagnostics.
 
-Preserve the existing `.env`; add or update only the intended settings:
+The bottom of every authenticated admin tab contains a job error log. Its protected endpoint joins the latest 50 errors to their run ID, job and status, with IST timestamps, source/record details and remediation guidance. It refreshes every 15 seconds and supports manual refresh. SQL statements, credentials and raw exception bodies are not exposed.
+
+The corrected live IPO run `c56db71f-dfff-4ddc-8d7c-1703b923bcda` completed `SUCCESS` with zero errors: 14 source records staged, 12 master writes, two unchanged observations, and seven distinct companies (five active, two upcoming). All five active companies have subscription totals. The two upcoming companies are Varmora Granito and Pooja Logistics. Import counters count records, not companies. The exact source response shapes are covered by `tests/fixtures/nse-ipo-snapshot.json` and the repeated-run population test.
+
+## Docker setup
+
+Preserve the existing `.env`. Relevant settings:
 
 ```dotenv
 EXCHANGE_DIRECT_ENABLED=true
 MARKET_SCHEDULER_ENABLED=true
 MARKET_SCHEDULER_DRIVER=celery
 EXCHANGE_SOURCES_JSON=[]
+BSE_IPO_ISSUES_JSON=[]
 TRADING_CALENDAR_YEAR=2026
 TRADING_HOLIDAYS=<confirmed comma-separated exchange holiday dates>
 ```
 
-The calendar must be populated and reviewed; do not copy the placeholder above. Missing or outdated calendar configuration blocks price collection. `EXCHANGE_SOURCES_JSON=[]` enables only built-in IPO/bhavcopy sources, not financial discovery. It does not need an API key. The existing `MARKET_FEEDS_JSON` remains available for optional approved feeds and unofficial GMP.
+Do not copy the holiday placeholder. Missing/outdated calendar configuration blocks price collection. `MARKET_SCHEDULER_DRIVER=vercel` disables Docker beat and permits the authenticated Vercel bridge instead; use only one scheduler owner. Vercel UTC schedules are committed in `apps/web/vercel.json`.
 
 ```powershell
 cd C:\Coding\meraipo
 docker compose up --build -d
-docker compose ps
+docker compose exec api python -m apps.worker.market_cli sync-ipos
+docker compose exec api python -m apps.worker.market_cli sync-prices
+docker compose exec api python -m apps.worker.market_cli sync-results
 ```
 
-Open `http://localhost:3000/meraadmin`, sign in, and select **Data & scheduler**. Run a collection job, inspect its saved/error counts, then run the corresponding publishing job. Running publication with no valid staged records is explicitly skipped. Successful network retrieval with zero matching records is different from records published to the site.
+Open `http://localhost:3000/meraadmin` → **Data & scheduler** to run, pause or inspect jobs. Sync jobs need no second publishing click. Rejected staging records can be retried after correcting mappings. A manual price replay accepts `--to-date YYYY-MM-DD` for one non-future trading date.
 
-## Native discovery mapping contract
+## BSE and financial mappings
 
-Each `EXCHANGE_SOURCES_JSON` entry has:
+BSE IPO discovery is now attempted on every direct IPO sync through the official site's `GetPublicIssue_par_updated/w?flag=1` service. The URL and field bindings were inspected in BSE's public application bundle and `assets/data/appConfig.json`. The parser handles the full `Table` array, filters known non-IPO issue types, validates platform/dates/price bands, and records bad rows with issue ID/name. It does not infer missing financial fields. New BSE-only issues use stable BSE issue IDs and any supplied BSE symbol/code/ISIN. A shared verified identifier links an existing company; an ambiguous name/symbol candidate is rejected for mapping review rather than duplicated or merged by name.
 
-- `name`, `exchange` (`NSE`/`BSE`), `kind` (`ipos`/`subscriptions`/`results`), and an official HTTPS `url`.
-- `records_path`: dot-separated JSON path to the native array, or empty for a top-level array.
-- `fields`: normalized target field to exact native field path. Nested targets such as `issue.name` are supported.
-- `defaults`: explicit fixed metadata where the source requires it; never use this to fabricate prices, dates or results.
-- `params`: request parameters; `{from}` and `{to}` expand to `DD-MM-YYYY`.
-- Optional `page_param`, `size_param` (default `size`), and `page_size` (default 100).
-- For results, `concepts`: metric names mapped to exact expanded XML QNames (`{namespace}Concept`). Review separately for each financial taxonomy/company type.
+**Live access remains blocked:** this environment's requests to the BSE public API returned redirects to a member-access page; direct browser retrieval was also denied. The connector reports `BSE_ACCESS_REDIRECT` with the source URL and guidance in the admin error log and allows successful NSE records to publish. Synthetic population tests validate the published field contract, not a successful live BSE-only import. Actual BSE payload compatibility and permitted access still need verification.
 
-Result discovery must map at least an exchange identifier, `xbrl_url`, and `source_timestamp`; optionally map `filing_id` (otherwise the XML URL hash is used). Exchange-local naive timestamps are interpreted as IST. Source names/paths must be confirmed from actual official responses; examples in automated tests are deliberately fictional and are not deployment configuration.
+`BSE_IPO_ISSUES_JSON` is an array of `{ "issue_id": "<official BSE issue ID>", "isin": "<company ISIN>" }`. An exact `nse_symbol` or six-digit `bse_code` can replace ISIN. The example issue ID in the supplied brief must not be assigned to an unrelated company. Only tracked open/closed IPOs are requested.
 
-Public sources reviewed:
+Each `EXCHANGE_SOURCES_JSON` entry has `name`, `exchange` (`NSE`/`BSE`), `kind` (`ipos`/`subscriptions`/`results`), official HTTPS `url`, `records_path` (dot-separated JSON path or empty for a top-level array), and `fields` mapping normalized targets to native field paths. Nested targets such as `issue.name` are supported. `defaults` can supply fixed metadata, never fabricated market values. Optional `params` expand `{from}`/`{to}` to DD-MM-YYYY; `page_param`, `size_param` and `page_size` control bounded pagination.
 
-- [NSE reports and UDiFF transition](https://www.nseindia.com/all-reports)
-- [NSE current IPO response](https://www.nseindia.com/api/ipo-current-issue)
-- [NSE financial results](https://www.nseindia.com/companies-listing/corporate-filings-financial-results)
-- [NSE taxonomy downloads](https://www.nseindia.com/static/companies-listing/xbrl-information)
-- [BSE bhavcopy](https://www.bseindia.com/markets/MarketInfo/BhavCopy.aspx)
+Financial discovery maps an exact identifier, `xbrl_url`, `source_timestamp`, and optionally `filing_id`. `concepts` maps metric names to exact expanded XML QNames (`{namespace}Concept`) for a reviewed taxonomy. Naive exchange timestamps are interpreted as IST. Actual XML instances are required; inline XBRL HTML is not supported.
 
-Public access and public redistribution permission are separate, as explained in the supplied brief; this implementation does not grant exchange display rights.
+Financial scans overlap fourteen days, filter tracked companies before downloading XML, skip processed filing ID/timestamp pairs and preserve revised filings. Each run is limited to five pages, twenty filings and a bounded collection time. Limits are reported; no truncated scan is presented as complete. A longer outage needs backfill. Complete fiscal quarters/annual periods, company ISIN, INR units and reporting basis are validated; ambiguous, segment/YTD, unsafe or unmapped facts are rejected. Consolidated results remain the preferred public view.
 
-## Verification
+## Sources and verification
 
-`tests/test_exchange_pipeline.py` covers ZIP/CSV parsing, identifier filtering, wrong dates, access denials without bypass attempts, collection/publication separation, repeat runs, NSE preference/BSE fallback, both-exchange history, relational daily subscriptions, ratio validation, Friday scheduling, financial XML parsing and publication, rejected-record recovery, and preventing duplicate scheduler ownership. Migration tests upgrade existing data, check model/schema agreement, and exercise downgrade/upgrade on a disposable database.
+- [NSE IPO source](https://www.nseindia.com/api/ipo-current-issue)
+- [NSE UDiFF reports](https://www.nseindia.com/all-reports)
+- [BSE cumulative-demand example](https://www.bseindia.com/markets/publicIssues/CummDemandSchedule.aspx?ID=7154&status=L)
+- [NSE financial filings](https://www.nseindia.com/companies-listing/corporate-filings-financial-results)
+- [NSE taxonomy information](https://www.nseindia.com/static/companies-listing/xbrl-information)
+- [NSE capital-market holiday response](https://www.nseindia.com/api/holiday-master?type=trading), verified for 2026 including January 15. Special weekend/Muhurat sessions need manual replay.
 
-Browser tests exercise the popup on desktop and mobile, percentages, daily history, Escape/focus restoration, retry after failed requests, navigation to the company journey, admin controls, and existing critical flows. Fictional fixtures stay isolated from the running Docker database.
+Public availability and redistribution permission are separate, as noted in the supplied brief; this implementation does not grant exchange display rights.
+
+`tests/test_exchange_pipeline.py` covers single-job staging/publication, repeated runs, source failure isolation, NSE preference/BSE fallback, daily subscription joins, exchange-total comparisons, BSE HTML parsing, financial XML ingestion, scheduling and rejected-record recovery. Migration tests preserve existing IPO data and check schema/model agreement. Desktop/mobile Playwright tests cover the company popup, daily history, percentage display, error recovery, keyboard focus, navigation and admin controls. Fixture data stays isolated from the Docker application database.

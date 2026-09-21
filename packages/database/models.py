@@ -38,6 +38,29 @@ class Sector(Entity, Base):
     name: Mapped[str] = mapped_column(String(120), unique=True)
 
 
+class CustomerFeedback(Entity, Base):
+    __tablename__ = "customer_feedback"
+    kind: Mapped[str] = mapped_column(String(20))
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    author_hash: Mapped[str] = mapped_column(String(64))
+    request_key: Mapped[str] = mapped_column(String(36))
+    __table_args__ = (
+        UniqueConstraint("author_hash", "request_key"),
+        Index("ix_feedback_public", "kind", "status", "created_at"),
+    )
+
+
+class FeedbackVote(Entity, Base):
+    __tablename__ = "customer_feedback_votes"
+    feedback_id: Mapped[str] = mapped_column(
+        ForeignKey("customer_feedback.id", ondelete="CASCADE"), index=True
+    )
+    voter_hash: Mapped[str] = mapped_column(String(64))
+    __table_args__ = (UniqueConstraint("feedback_id", "voter_hash"),)
+
+
 class Company(Entity, Base):
     __tablename__ = "companies"
     slug: Mapped[str] = mapped_column(String(120), unique=True)
@@ -156,6 +179,7 @@ class Subscription(Entity, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     categories: Mapped[dict | None] = mapped_column(JSON)
     source_provider: Mapped[str | None] = mapped_column(String(100))
+    source_exchange: Mapped[str | None] = mapped_column(String(20))
     source_url: Mapped[str | None] = mapped_column(Text)
     payload_hash: Mapped[str | None] = mapped_column(String(64))
     raw_payload_id: Mapped[str | None] = mapped_column(ForeignKey("data_raw_payloads.id"))

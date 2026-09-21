@@ -14,6 +14,7 @@ export function IPOInterestTable({ companies }: { companies: Company[] }) {
         <thead>
           <tr>
             <th>Company / bidding dates</th>
+            <th>Security type</th>
             <th>Price band</th>
             <th>Retail %</th>
             <th>QIB %</th>
@@ -31,6 +32,7 @@ export function IPOInterestTable({ companies }: { companies: Company[] }) {
                   {c.board} · {date(c.open_date)} – {date(c.close_date)}
                 </small>
               </td>
+              <td>{c.board === 'SME' ? 'SME' : 'EQ'}</td>
               <td>
                 {c.price_low == null || c.price_high == null
                   ? 'Not announced'

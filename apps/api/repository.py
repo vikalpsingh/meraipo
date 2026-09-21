@@ -31,6 +31,51 @@ def subscription_view(row):
     }
 
 
+def merge_subscriptions(rows):
+    from decimal import Decimal
+    from zoneinfo import ZoneInfo
+
+    if not rows:
+        return None
+    rows = sorted(rows, key=lambda r: utc(r.observed_at), reverse=True)
+    day = utc(rows[0].observed_at).astimezone(ZoneInfo("Asia/Kolkata")).date()
+    rows = [
+        r for r in rows if utc(r.observed_at).astimezone(ZoneInfo("Asia/Kolkata")).date() == day
+    ]
+    combined = subscription_view(rows[0])
+    categories = {}
+    for key in ("total", "retail", "qib", "nii", "bnii", "snii", "employee", "shareholder"):
+        candidates = [r for r in rows if key in (r.categories or {})]
+        preferred = "NSE" if key == "total" else "BSE"
+        candidates.sort(
+            key=lambda r: 0 if (r.source_exchange or r.source_provider) == preferred else 1
+        )
+        if candidates:
+            row = candidates[0]
+            categories[key] = {
+                **row.categories[key],
+                "source_provider": row.source_provider,
+                "source_url": row.source_url,
+                "observed_at": utc(row.observed_at).isoformat(),
+            }
+    combined["categories"] = categories
+    combined["multiple"] = numeric(
+        categories.get("total", {}).get("multiple", combined["multiple"])
+    )
+    totals = [
+        Decimal(r.categories["total"]["multiple"])
+        for r in rows
+        if (r.categories or {}).get("total", {}).get("multiple") is not None
+    ]
+    combined["source_disagreement"] = len(totals) > 1 and max(totals) - min(totals) > Decimal(
+        "0.01"
+    )
+    combined["source_provider"] = " / ".join(
+        dict.fromkeys(r.source_provider or "Manual" for r in rows)
+    )
+    return combined
+
+
 def metrics(obj):
     return (
         {key: numeric(getattr(obj, key)) for key in METRICS}
@@ -115,7 +160,7 @@ async def catalog(db):
             m.Subscription.id,
             func.row_number()
             .over(
-                partition_by=m.Subscription.ipo_id,
+                partition_by=(m.Subscription.ipo_id, m.Subscription.source_provider),
                 order_by=(m.Subscription.observed_at.desc(), m.Subscription.created_at.desc()),
             )
             .label("rn"),
@@ -123,16 +168,15 @@ async def catalog(db):
         .where(m.Subscription.ipo_id.in_(ipo_ids))
         .subquery()
     )
-    subscriptions = {
-        s.ipo_id: s
-        for s in (
-            await db.scalars(
-                select(m.Subscription)
-                .join(ranked, ranked.c.id == m.Subscription.id)
-                .where(ranked.c.rn == 1)
-            )
-        ).all()
-    }
+    subscriptions = {}
+    for s in (
+        await db.scalars(
+            select(m.Subscription)
+            .join(ranked, ranked.c.id == m.Subscription.id)
+            .where(ranked.c.rn == 1)
+        )
+    ).all():
+        subscriptions.setdefault(s.ipo_id, []).append(s)
     identifiers = {
         i.company_id: i
         for i in (
@@ -225,8 +269,18 @@ async def catalog(db):
                 "sector": sector.name if sector else "Unclassified",
                 "board": company.board,
                 "is_demo": company.is_demo,
-                "ticker": identifier.ticker if identifier else None,
-                "exchange": identifier.exchange if identifier else None,
+                "ticker": (
+                    identifier.ticker if identifier and identifier.exchange != "BSE_ISSUE" else None
+                ),
+                "exchange": (
+                    (
+                        "BSE"
+                        if identifier.exchange in {"BSE_SYMBOL", "BSE_ISSUE"}
+                        else identifier.exchange
+                    )
+                    if identifier
+                    else None
+                ),
                 "status": ipo.status,
                 "quality": quality,
                 "open_date": dates.open_date.isoformat() if dates and dates.open_date else None,
@@ -253,7 +307,7 @@ async def catalog(db):
                 "fresh_issue": numeric(ipo.fresh_issue),
                 "ofs": numeric(ipo.ofs),
                 "gmp": numeric(gmp.value) if gmp else None,
-                "subscription": subscription_view(subscriptions.get(ipo.id)),
+                "subscription": merge_subscriptions(subscriptions.get(ipo.id, [])),
                 "gmp_estimated_price": (
                     numeric(ipo.price_high + gmp.value)
                     if gmp and gmp.value is not None and ipo.price_high
@@ -329,18 +383,6 @@ async def journey(db, slug):
         {**record(row), **{k: numeric(v) for k, v in (row.industry_metrics or {}).items()}}
         for row in list(annual.values())[:4]
     ]
-    company["subscription"] = None
-    subscription = await db.scalar(
-        select(m.Subscription)
-        .where(m.Subscription.ipo_id == company["ipo_id"])
-        .order_by(m.Subscription.observed_at.desc())
-        .limit(1)
-    )
-    if subscription:
-        company["subscription"] = {
-            key: record(subscription)[key]
-            for key in ("observed_at", "categories", "multiple", "source_provider", "source_url")
-        }
     history = (
         await db.execute(
             select(m.SubscriptionDay, m.SubscriptionDetail)

@@ -130,8 +130,8 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
             </h3>
             <p>
               Keep Docker running for automatic collection and publication. Scheduler:{' '}
-              {data.driver === 'celery' ? 'Docker / Celery' : 'Vercel'}. Collect jobs save source
-              records; publish jobs update the website.
+              {data.driver === 'celery' ? 'Docker / Celery' : 'Vercel'}. Each sync stages source
+              records, then publishes validated records to the website in the same job.
             </p>
             <ul className="setup-list">
               {data.setup.map((item) => (
@@ -180,6 +180,10 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
             {data.staging.PENDING || 0} awaiting publication · {data.staging.REJECTED || 0} rejected
             · {data.staging.PUBLISHED || 0} published. Collection does not change public data.
           </p>
+          <p className="small">
+            Import counts are data records, not company counts. One IPO can have separate issue and
+            subscription records.
+          </p>
           <label>
             <input
               type="checkbox"
@@ -191,9 +195,7 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
           <div className="scheduler-grid">
             {data.jobs
               .filter(
-                (job) =>
-                  job.name !== 'backfill' &&
-                  (advanced || job.name.startsWith('collect-') || job.name.startsWith('publish-')),
+                (job) => job.name !== 'backfill' && (advanced || job.name.startsWith('sync-')),
               )
               .map((job) => (
                 <article className="panel" key={job.name}>
@@ -212,8 +214,9 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
                   </p>
                   {job.last?.counters && (
                     <p>
-                      {job.last.counters.written || 0} saved · {job.last.counters.failed || 0}{' '}
-                      errors
+                      {job.last.counters.staged || 0} records staged ·{' '}
+                      {job.last.counters.written || 0} records published ·{' '}
+                      {job.last.counters.failed || 0} errors
                     </p>
                   )}
                   {job.last?.error && <p className="small">{job.last.error}</p>}
@@ -231,20 +234,21 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
                     >
                       Run now
                     </button>
-                    {job.name.startsWith('publish-') && data.staging.REJECTED > 0 && (
-                      <button
-                        className="outline-button"
-                        disabled={
-                          busy ||
-                          job.paused ||
-                          job.last?.status === 'QUEUED' ||
-                          job.last?.status === 'RUNNING'
-                        }
-                        onClick={() => action(job.name, 'run', { retry_rejected: true })}
-                      >
-                        Retry rejected
-                      </button>
-                    )}
+                    {(job.name.startsWith('publish-') || job.name.startsWith('sync-')) &&
+                      data.staging.REJECTED > 0 && (
+                        <button
+                          className="outline-button"
+                          disabled={
+                            busy ||
+                            job.paused ||
+                            job.last?.status === 'QUEUED' ||
+                            job.last?.status === 'RUNNING'
+                          }
+                          onClick={() => action(job.name, 'run', { retry_rejected: true })}
+                        >
+                          Retry rejected
+                        </button>
+                      )}
                     <button
                       className="outline-button"
                       disabled={busy}
@@ -339,7 +343,7 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
             </form>
           </details>
           <details className="panel">
-            <summary>Recent runs and errors ({data.runs.length})</summary>
+            <summary>Recent runs ({data.runs.length})</summary>
             {data.runs.length === 0 ? (
               <p>No jobs have run yet.</p>
             ) : (
@@ -360,15 +364,6 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
                 ))}
               </ul>
             )}
-            {data.errors.map((error) => (
-              <p key={error.id}>
-                <strong>
-                  {error.provider} · {error.code}
-                </strong>
-                <br />
-                {error.item}: {error.detail}
-              </p>
-            ))}
           </details>
         </>
       )}

@@ -48,10 +48,19 @@ export type Company = {
   gmp_estimated_price?: number | null;
   annuals?: (Partial<Quarter> & { financial_year: number })[];
   subscription?: {
+    source_disagreement?: boolean;
     observed_at: string;
     source_provider: string | null;
     source_url: string | null;
-    categories: Record<string, { multiple: string | null }> | null;
+    categories: Record<
+      string,
+      {
+        multiple: string | null;
+        source_provider?: string;
+        source_url?: string;
+        observed_at?: string;
+      }
+    > | null;
     multiple: number | null;
   } | null;
   applicant_guide: ApplicantGuide | null;

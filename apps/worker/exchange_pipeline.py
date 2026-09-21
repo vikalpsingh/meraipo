@@ -2,7 +2,7 @@
 
 import json
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
@@ -65,13 +65,31 @@ async def raw_payload(db, provider, kind, url, raw):
 
 def error(db, run, provider, item, exc):
     code = str(exc) if isinstance(exc, FeedError) else type(exc).__name__
+    guidance = {
+        "EXCHANGE_HTTP_404": "The exchange URL or dated file was not found. Verify the official endpoint and trading date, then rerun the job.",
+        "EXCHANGE_HTTP_403": "The exchange denied access. Verify permitted source access before retrying.",
+        "BSE_ACCESS_REDIRECT": "BSE redirected the public IPO API to another page instead of returning data. Verify permitted API access with BSE; previous website data is retained.",
+        "BSE_IPO_SCHEMA_CHANGED": "BSE did not return the expected Table list. Review the retained raw response and official field mapping.",
+        "BSE_CROSS_EXCHANGE_MAPPING_REQUIRED": "A possible existing issuer was found. Add a verified shared ISIN or exchange identifier before retrying; no duplicate company was created.",
+        "BSE_INVALID_IPO_ROW": "This BSE issue failed validation. Review the issue ID/name in Source / record and its retained raw payload.",
+        "EXCHANGE_HTTP_406": "The exchange rejected this request. Review the source access requirements.",
+        "ProgrammingError": "Database schema or query mismatch. Apply pending migrations and check worker diagnostics, then retry rejected records.",
+        "BSE_IDENTIFIER_REQUIRED": "The earlier parser rejected a BSE-symbol issue. Update the connector and rerun IPO sync to collect it again.",
+        "UNMAPPED_IDENTIFIER": "No company matches the source identifier. Import its IPO or correct the exchange mapping, then retry rejected records.",
+        "INVALID_IPO_ROW": "The source IPO row failed validation. Review its retained raw payload and parser field mapping.",
+        "NSE_IPO_SCHEMA_CHANGED": "The NSE response no longer matches the expected issue list. Review the retained raw response before updating the parser.",
+        "TimeoutError": "The exchange request exceeded its time limit. Retry later; previous published data is retained.",
+    }
     db.add(
         m.JobError(
             run_id=run.id,
             provider=provider,
             item=item[:200],
             code=code[:80],
-            detail="Collection/publication rejected; last published data retained. Review source mapping and raw payload.",
+            detail=guidance.get(
+                code,
+                "Collection/publication rejected; last published data retained. Review source mapping and raw payload.",
+            ),
         )
     )
 
@@ -89,7 +107,7 @@ async def stage(db, kind, value, provider, authority, raw_id):
     if kind == "ipos":
         identity["issue"] = {k: v for k, v in payload["issue"].items() if k != "source_timestamp"}
     # Subscription observations retain a daily snapshot even when the multiple is unchanged.
-    if kind == "subscriptions":
+    if kind in ("subscriptions", "gmp"):
         identity["day"] = (
             data.source_timestamp.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
         )
@@ -110,6 +128,16 @@ async def stage(db, kind, value, provider, authority, raw_id):
     return True
 
 
+def record_context(kind, value):
+    identifiers = [
+        str(value[key])
+        for key in ("bse_issue_id", "bse_symbol", "bse_code", "nse_symbol", "isin")
+        if value.get(key)
+    ]
+    name = value.get("issue", {}).get("name", "")
+    return ":".join([kind, *identifiers, name])[:200]
+
+
 async def store_batch(db, run, provider, authority, url, raw, records, errors, counts):
     payload = await raw_payload(db, provider, records[0][0] if records else "collection", url, raw)
     counts["providers"] += 1
@@ -120,11 +148,14 @@ async def store_batch(db, run, provider, authority, url, raw, records, errors, c
         counts["fetched"] += 1
         try:
             async with db.begin_nested():
-                changed = await stage(db, kind, value, provider, authority, payload.id)
+                record_authority = (
+                    "BSE" if provider == "NSE" and value.get("bse_symbol") else authority
+                )
+                changed = await stage(db, kind, value, provider, record_authority, payload.id)
                 counts["written" if changed else "unchanged"] += 1
         except Exception as exc:
             counts["failed"] += 1
-            error(db, run, provider, kind, exc)
+            error(db, run, provider, record_context(kind, value), exc)
 
 
 async def tracked_identifiers(db):
@@ -145,6 +176,8 @@ async def tracked_identifiers(db):
 async def collect(db, run, counts, download=ex.download):
     deadline = time.monotonic() + 170
     config, today = settings(), india_today()
+    if (run.parameters or {}).get("trade_date"):
+        today = date.fromisoformat(run.parameters["trade_date"])
     kinds = PIPELINE_JOBS[run.job_name][2]
     if "prices" in kinds and (
         today.weekday() >= 5 or today.isoformat() in config.trading_holidays.split(",")
@@ -176,7 +209,52 @@ async def collect(db, run, counts, download=ex.download):
                 counts["failed"] += 1
                 if isinstance(exc, FeedError) and exc.raw:
                     await raw_payload(db, exchange, kinds[0], url, exc.raw)
-                error(db, run, exchange, kinds[0], exc)
+                error(db, run, exchange, url, exc)
+        if "ipos" in kinds:
+            from packages.providers.bse_ipo import BSE_LIST_URL, parse_issues
+
+            try:
+                if time.monotonic() > deadline:
+                    raise FeedError("COLLECTION_TIME_BUDGET_RETRY")
+                parsed = parse_issues(await download(BSE_LIST_URL), m.now())
+                await store_batch(db, run, "BSE", "BSE", BSE_LIST_URL, *parsed, counts)
+            except Exception as exc:
+                counts["failed"] += 1
+                if isinstance(exc, FeedError) and exc.raw:
+                    await raw_payload(db, "BSE", "ipos", BSE_LIST_URL, exc.raw)
+                if isinstance(exc, FeedError) and str(exc) in {
+                    "EXCHANGE_HTTP_301",
+                    "EXCHANGE_HTTP_302",
+                    "EXCHANGE_HTTP_307",
+                    "EXCHANGE_HTTP_308",
+                }:
+                    exc = FeedError("BSE_ACCESS_REDIRECT")
+                error(db, run, "BSE", "ipos:" + BSE_LIST_URL, exc)
+        if "subscriptions" in kinds:
+            from packages.providers.bse_ipo import BseIpoProvider
+            from packages.providers.bse_ipo import configuration as bse_configuration
+
+            for issue in bse_configuration(config.bse_ipo_issues_json):
+                try:
+                    if time.monotonic() > deadline:
+                        raise FeedError("COLLECTION_TIME_BUDGET_RETRY")
+                    company = await match_company(db, issue)
+                    if not company or company.is_demo:
+                        continue
+                    ipo = await db.scalar(select(m.IPO).where(m.IPO.company_id == company.id))
+                    if not ipo or ipo.status not in ("OPEN", "CLOSED"):
+                        continue
+                    parsed = await BseIpoProvider().fetch(issue, m.now(), download)
+                    await store_batch(
+                        db, run, "BSE", "BSE", BseIpoProvider.url(issue.issue_id), *parsed, counts
+                    )
+                except Exception as exc:
+                    counts["failed"] += 1
+                    if isinstance(exc, FeedError) and exc.raw:
+                        await raw_payload(
+                            db, "BSE", "subscriptions", BseIpoProvider.url(issue.issue_id), exc.raw
+                        )
+                    error(db, run, "BSE", "subscriptions", exc)
         for source in ex.discovery_sources(config.exchange_sources_json):
             if source.kind not in kinds:
                 continue
@@ -404,7 +482,7 @@ async def publish(db, run, counts):
                 str(exc)[:100] if isinstance(exc, FeedError) else type(exc).__name__
             )
             counts["failed"] += 1
-            error(db, run, row.provider, row.kind, exc)
+            error(db, run, row.provider, record_context(row.kind, row.data), exc)
     await reconcile_lifecycle(db, india_today())
     counts["providers"] = 1 if rows else 0
     return None if rows else "NO_PENDING_RECORDS"

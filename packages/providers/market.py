@@ -65,12 +65,22 @@ class Identity(Input):
     isin: str | None = Field(None, pattern=r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
     nse_symbol: str | None = Field(None, min_length=1, max_length=40)
     bse_code: str | None = Field(None, pattern=r"^[0-9]{6}$")
+    bse_symbol: str | None = Field(None, pattern=r"^[A-Z0-9&._-]{1,40}$")
+    bse_issue_id: str | None = Field(None, pattern=r"^[0-9]{1,12}$")
 
     @model_validator(mode="after")
     def identity_required(self):
-        if not any((self.isin, self.nse_symbol, self.bse_code)):
+        if not any((self.isin, self.nse_symbol, self.bse_code, self.bse_symbol, self.bse_issue_id)):
             raise ValueError("ISIN or exchange identifier required; names are not identifiers")
         return self
+
+    def exchange_identifiers(self):
+        return (
+            ("NSE", self.nse_symbol),
+            ("BSE", self.bse_code),
+            ("BSE_SYMBOL", self.bse_symbol),
+            ("BSE_ISSUE", self.bse_issue_id),
+        )
 
 
 class Observation(Identity):

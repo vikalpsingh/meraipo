@@ -4,6 +4,8 @@ import type { Company, SiteMessage, Advertisement } from '@/lib/types';
 import { human, timestamp } from '@/lib/format';
 import { GuideEditor } from '@/components/guide-editor';
 import { MarketConsole } from '@/components/market-console';
+import { JobErrorLog } from '@/components/job-error-log';
+import { FeedbackInbox } from '@/components/feedback-inbox';
 type Session = { email: string; csrf_token: string };
 type Dashboard = {
   companies: Company[];
@@ -248,6 +250,7 @@ export default function Console() {
         {[
           'Dashboard',
           'Data & scheduler',
+          'Customer feedback',
           'IPOs',
           'Applicant guides',
           'GMP',
@@ -272,6 +275,7 @@ export default function Console() {
         {status}
       </p>
       {tab === 'Applicant guides' && <GuideEditor companies={companies} busy={busy} save={save} />}
+      {tab === 'Customer feedback' && <FeedbackInbox csrf={session.csrf_token} />}
       {tab === 'Data & scheduler' && session && (
         <MarketConsole csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
@@ -725,6 +729,7 @@ export default function Console() {
           ))}
         </section>
       )}
+      <JobErrorLog />
     </>
   );
 }
