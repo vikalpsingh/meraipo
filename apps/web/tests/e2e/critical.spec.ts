@@ -223,7 +223,8 @@ test('visitors find companies, recover from empty search and follow section link
       .getByRole('navigation', { name: 'Main navigation' })
       .getByRole('link', { name: 'Home', exact: true }),
   ).toHaveAttribute('aria-current', 'page');
-  await page.getByLabel('Find an IPO or company').fill('Aarya');
+  await page.getByRole('button', { name: 'Find an IPO or company', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Find an IPO or company' }).fill('Aarya');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('1 company matching');
   await expect(page.locator('.ipo-card')).toHaveCount(1);
@@ -239,7 +240,12 @@ test('visitors find companies, recover from empty search and follow section link
   await page.goto('/?q=no-such-company');
   await expect(page.getByRole('heading', { name: 'No matching companies' })).toBeVisible();
   await page.getByRole('link', { name: 'Show all IPOs', exact: true }).click();
-  await expect(page.getByLabel('Find an IPO or company')).toHaveValue('');
+  await expect(page).toHaveURL('/');
+  await expect(
+    page.getByRole('button', { name: 'Find an IPO or company', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Find an IPO or company', exact: true }).click();
+  await expect(page.getByRole('searchbox', { name: 'Find an IPO or company' })).toHaveValue('');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({
     path: testInfo.outputPath('home-usability.png'),

@@ -110,6 +110,16 @@ class IPO(Entity, Base):
     shareholder_quota_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
 
 
+class IPOProviderDetail(Entity, Base):
+    __tablename__ = "ipo_provider_details"
+    ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), unique=True)
+    provider: Mapped[str] = mapped_column(String(100))
+    data: Mapped[dict] = mapped_column(JSON)
+    source_url: Mapped[str] = mapped_column(Text)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    raw_payload_id: Mapped[str | None] = mapped_column(ForeignKey("data_raw_payloads.id"))
+
+
 class IPODate(Entity, Base):
     __tablename__ = "ipo_dates"
     ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), unique=True)
@@ -429,6 +439,13 @@ class Advertisement(Entity, Base):
     destination_url: Mapped[str] = mapped_column(Text)
     placement: Mapped[str] = mapped_column(String(30), default="home")
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class FeatureFlag(Base):
+    __tablename__ = "site_feature_flags"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
 class AdminUser(Entity, Base):

@@ -42,7 +42,7 @@ class IPOInput(ProvenanceInput):
     slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=120)
     name: str = Field(min_length=2, max_length=200)
     sector: str = Field(min_length=1, max_length=120)
-    board: Literal["Mainboard", "SME"] = "Mainboard"
+    board: Literal["Mainboard", "SME", "Unknown"] = "Mainboard"
     ticker: str | None = Field(None, max_length=40)
     exchange: Literal["NSE", "BSE"] = "NSE"
     status: Literal["OPEN", "UPCOMING", "CLOSED", "LISTED"]

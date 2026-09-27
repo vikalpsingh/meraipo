@@ -62,6 +62,8 @@ def configuration(value):
 
 
 class Identity(Input):
+    provider_namespace: str | None = Field(None, pattern=r"^[A-Z][A-Z0-9_]{1,19}$")
+    provider_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
     isin: str | None = Field(None, pattern=r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
     nse_symbol: str | None = Field(None, min_length=1, max_length=40)
     bse_code: str | None = Field(None, pattern=r"^[0-9]{6}$")
@@ -70,7 +72,23 @@ class Identity(Input):
 
     @model_validator(mode="after")
     def identity_required(self):
-        if not any((self.isin, self.nse_symbol, self.bse_code, self.bse_symbol, self.bse_issue_id)):
+        if bool(self.provider_namespace) != bool(self.provider_id) or self.provider_namespace in {
+            "NSE",
+            "BSE",
+            "BSE_SYMBOL",
+            "BSE_ISSUE",
+        }:
+            raise ValueError("Provider identity requires its own namespace and ID")
+        if not any(
+            (
+                self.isin,
+                self.nse_symbol,
+                self.bse_code,
+                self.bse_symbol,
+                self.bse_issue_id,
+                self.provider_id,
+            )
+        ):
             raise ValueError("ISIN or exchange identifier required; names are not identifiers")
         return self
 
@@ -80,6 +98,7 @@ class Identity(Input):
             ("BSE", self.bse_code),
             ("BSE_SYMBOL", self.bse_symbol),
             ("BSE_ISSUE", self.bse_issue_id),
+            (self.provider_namespace, self.provider_id),
         )
 
 
@@ -96,7 +115,24 @@ class Observation(Identity):
         return value
 
 
+class ProviderSchedule(Input):
+    event: str = Field(min_length=1, max_length=200)
+    date: date
+
+
+class ProviderDetails(Input):
+    about: str | None = Field(None, max_length=20000)
+    strengths: list[str] = Field(default_factory=list, max_length=30)
+    risks: list[str] = Field(default_factory=list, max_length=30)
+    schedule: list[ProviderSchedule] = Field(default_factory=list, max_length=40)
+    minimum_amount: Decimal | None = Field(None, gt=0, max_digits=20, decimal_places=4)
+    logo_url: str | None = None
+    info_url: str | None = None
+    _links = field_validator("logo_url", "info_url")(https_url)
+
+
 class Issue(Observation):
+    provider_details: ProviderDetails | None = None
     company_type: Literal["GENERAL", "BANK", "NBFC", "INSURANCE", "REIT", "INVIT", "OTHER"] = (
         "GENERAL"
     )

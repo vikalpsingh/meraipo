@@ -5,7 +5,10 @@ os.environ["DEMO_MODE"] = "true"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./work/test-local.db"
 os.environ["PUBLIC_ORIGIN"] = "http://localhost:3000"
 os.environ["MARKET_FEEDS_JSON"] = "{}"
+os.environ["IPO_DATA_PROVIDER"] = "exchange"
+os.environ["IPOALERTS_API_KEY"] = ""
 os.environ["EXCHANGE_DIRECT_ENABLED"] = "false"
+os.environ["NSE_SUBSCRIPTION_CATEGORIES_ENABLED"] = "false"
 os.environ["EXCHANGE_SOURCES_JSON"] = "[]"
 os.environ["BSE_IPO_ISSUES_JSON"] = "[]"
 os.environ["MARKET_SCHEDULER_ENABLED"] = "false"
@@ -20,7 +23,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from apps.api import cache
 from apps.api.main import app
 from apps.api.security import hasher
-from packages.database.models import AdminUser, Base
+from packages.database.models import AdminUser, Base, FeatureFlag
 from packages.database.seed import seed
 from packages.database.session import get_session
 
@@ -42,6 +45,7 @@ async def db(tmp_path, monkeypatch):
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         await seed(session)
+        session.add(FeatureFlag(key="ipo_tracker", enabled=True))
         user = AdminUser(
             email="admin@example.com", password_hash=hasher.hash("test-only-password-42")
         )

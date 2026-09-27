@@ -25,7 +25,7 @@ def next_scheduled(job, at, holidays=()):
         day = at + timedelta(days=offset)
         if job in ("collect-results", "publish-results", "sync-results") and day.weekday() != 4:
             continue
-        if job in ("eod-prices", "collect-prices", "publish-prices", "sync-prices") and (
+        if job in ("eod-prices", "collect-prices", "publish-prices") and (
             day.weekday() >= 5 or day.date().isoformat() in holidays
         ):
             continue

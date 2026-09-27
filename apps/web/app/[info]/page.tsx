@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { features } from '@/lib/features';
 import { notFound } from 'next/navigation';
 const pages: Record<string, { title: string; intro: string; sections: [string, string][] }> = {
   about: {
@@ -138,6 +139,7 @@ export async function generateMetadata({ params }: { params: Promise<{ info: str
   return { title: pages[info]?.title, alternates: { canonical: '/' + info } };
 }
 export default async function Info({ params }: { params: Promise<{ info: string }> }) {
+  const flags = await features();
   const { info } = await params;
   const page = pages[info];
   if (!page) notFound();
@@ -155,8 +157,16 @@ export default async function Info({ params }: { params: Promise<{ info: string 
           <p>{text}</p>
         </section>
       ))}
-      <Link className="outline-button" href={info === 'methodology' ? '/tracker' : '/methodology'}>
-        {info === 'methodology' ? 'Explore IPO Tracker' : 'Read our methodology'} →
+      <Link
+        className="outline-button"
+        href={info === 'methodology' ? (flags.ipo_tracker ? '/tracker' : '/') : '/methodology'}
+      >
+        {info === 'methodology'
+          ? flags.ipo_tracker
+            ? 'Explore IPO Tracker'
+            : 'Explore IPOs'
+          : 'Read our methodology'}{' '}
+        →
       </Link>
     </main>
   );

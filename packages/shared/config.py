@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     trading_calendar_year: int = 0
     market_scheduler_enabled: bool = False
     exchange_direct_enabled: bool = False
+    nse_subscription_categories_enabled: bool = True
+    ipo_data_provider: Literal["exchange", "ipoalerts", "feed"] = "exchange"
+    ipoalerts_api_key: SecretStr = SecretStr("")
+    ipoalerts_page_size: int = Field(3, ge=1, le=100)
     exchange_sources_json: str = "[]"
     bse_ipo_issues_json: str = "[]"
     market_scheduler_driver: Literal["celery", "vercel"] = "celery"

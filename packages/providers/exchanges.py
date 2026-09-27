@@ -130,6 +130,7 @@ def parse_bhavcopy(content, exchange, day, identities, fetched_at):
         if (
             isin not in identities["isin"]
             and (symbol if exchange == "NSE" else code) not in identities[exchange]
+            and not (exchange == "BSE" and symbol in identities.get("BSE_SYMBOL", set()))
         ):
             continue
         if exchange == "NSE" and row.get("SctySrs") not in (None, "", "EQ", "SM", "ST", "BE", "BZ"):
@@ -157,6 +158,7 @@ def parse_bhavcopy(content, exchange, day, identities, fetched_at):
                 isin=isin or None,
                 nse_symbol=symbol or None if exchange == "NSE" else None,
                 bse_code=code or None if exchange == "BSE" else None,
+                bse_symbol=symbol or None if exchange == "BSE" else None,
                 price_date=day,
                 source_url=bhavcopy_url(exchange, day),
                 source_timestamp=fetched_at,
@@ -195,14 +197,17 @@ def parse_nse_ipos(content, fetched_at, upcoming=False):
         try:
             bse = str(row.get("isBse", "")) == "1"
             symbol, name = row["symbol"], row["companyName"]
-            opened, closed = parse_date(row.get("issueStartDate")), parse_date(
-                row.get("issueEndDate")
+            opened, closed = (
+                parse_date(row.get("issueStartDate")),
+                parse_date(row.get("issueEndDate")),
             )
             day = fetched_at.astimezone(ZoneInfo("Asia/Kolkata")).date()
             status = (
                 "UPCOMING"
                 if (opened and opened > day) or (not opened and row.get("status") == "Forthcoming")
-                else "CLOSED" if closed and closed < day else "OPEN"
+                else "CLOSED"
+                if closed and closed < day
+                else "OPEN"
             )
             band = re.findall(r"\d+(?:\.\d+)?", str(row.get("issuePrice", "")).replace(",", ""))
             prices = {"price_low": band[0], "price_high": band[-1]} if 1 <= len(band) <= 2 else {}

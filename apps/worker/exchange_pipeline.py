@@ -29,7 +29,7 @@ from packages.shared.config import settings
 
 PIPELINE_JOBS = {
     "sync-ipos": ("IPO, subscription & GMP sync", "23:00 daily", ["ipos", "subscriptions", "gmp"]),
-    "sync-prices": ("Daily closing price sync", "23:10 trading days", ["prices"]),
+    "sync-prices": ("Daily closing price sync", "23:10 daily; latest trading day", ["prices"]),
     "sync-results": ("Quarterly result sync", "21:00 Friday", ["results"]),
     "collect-ipos": (
         "Collect IPOs & subscriptions",
@@ -66,6 +66,21 @@ async def raw_payload(db, provider, kind, url, raw):
 def error(db, run, provider, item, exc):
     code = str(exc) if isinstance(exc, FeedError) else type(exc).__name__
     guidance = {
+        "IPOALERTS_AUTH_FAILED": "IPOAlerts rejected the API key (401/403). Set a valid IPOALERTS_API_KEY on the backend and restart API/worker/scheduler. Existing data is retained.",
+        "IPOALERTS_KEY_REQUIRED": "Set IPOALERTS_API_KEY on the backend; preview access is not a complete market feed.",
+        "IPOALERTS_INCOMPLETE_ACCESS": "IPOAlerts returned restricted preview data. Verify API key and plan access; this response was not published.",
+        "IPOALERTS_RATE_LIMITED": "IPOAlerts rate limit reached. Wait for the provider quota to reset before rerunning.",
+        "IPOALERTS_SCHEMA_CHANGED": "IPOAlerts response or pagination metadata failed validation. Review the provider API contract.",
+        "IPOALERTS_INVALID_ROW": "The IPOAlerts record failed validation. Review its provider ID and retained raw response.",
+        "IPOALERTS_INVALID_GMP": "The GMP quote has an invalid value or observation timestamp. IPO master data is retained; no zero or fresh timestamp is invented.",
+        "TRADING_CALENDAR_REQUIRED": "Configure TRADING_CALENDAR_YEAR and TRADING_HOLIDAYS for the requested trading year. No price date was guessed.",
+        "FUTURE_TRADE_DATE": "Choose today or an earlier date for historical closing prices.",
+        "SUBSCRIPTION_CATEGORIES_NOT_CONFIGURED": "IPOAlerts does not supply Retail/QIB/NII subscriptions. Configure an approved category feed in MARKET_FEEDS_JSON or a verified BSE cumulative-demand mapping in BSE_IPO_ISSUES_JSON. NSE's issue list supplies totals only.",
+        "NSE_SUBSCRIPTION_NOT_PUBLISHED": "NSE has not published a dated consolidated subscription snapshot for this symbol. Previous observations are retained; missing allocations are not zero subscriptions.",
+        "NSE_SUBSCRIPTION_SCHEMA_CHANGED": "NSE consolidated category fields, timestamp or share-count validation failed. Review the retained raw payload before changing the mapping.",
+        "IPOALERTS_PAGINATION_CHANGED": "IPOAlerts pagination changed or repeated records. The incomplete status batch was not published; rerun collection.",
+        "IPOALERTS_TIME_BUDGET": "IPOAlerts collection reached the time budget. Completed status batches are retained; check plan limits and rerun.",
+        "IPOALERTS_UNAVAILABLE": "IPOAlerts was unavailable after bounded retries. Previous published data is retained.",
         "EXCHANGE_HTTP_404": "The exchange URL or dated file was not found. Verify the official endpoint and trading date, then rerun the job.",
         "EXCHANGE_HTTP_403": "The exchange denied access. Verify permitted source access before retrying.",
         "BSE_ACCESS_REDIRECT": "BSE redirected the public IPO API to another page instead of returning data. Verify permitted API access with BSE; previous website data is retained.",
@@ -149,7 +164,11 @@ async def store_batch(db, run, provider, authority, url, raw, records, errors, c
         try:
             async with db.begin_nested():
                 record_authority = (
-                    "BSE" if provider == "NSE" and value.get("bse_symbol") else authority
+                    "UNOFFICIAL"
+                    if kind == "gmp"
+                    else "BSE"
+                    if provider == "NSE" and value.get("bse_symbol")
+                    else authority
                 )
                 changed = await stage(db, kind, value, provider, record_authority, payload.id)
                 counts["written" if changed else "unchanged"] += 1
@@ -162,7 +181,12 @@ async def tracked_identifiers(db):
     companies = (
         await db.scalars(select(m.Company).join(m.IPO).where(m.Company.is_demo.is_(False)))
     ).all()
-    ids = {"isin": {c.isin for c in companies if c.isin}, "NSE": set(), "BSE": set()}
+    ids = {
+        "isin": {c.isin for c in companies if c.isin},
+        "NSE": set(),
+        "BSE": set(),
+        "BSE_SYMBOL": set(),
+    }
     for item in (
         await db.scalars(
             select(m.Identifier).where(m.Identifier.company_id.in_([c.id for c in companies]))
@@ -173,22 +197,66 @@ async def tracked_identifiers(db):
     return ids
 
 
+def latest_trading_day(day, config):
+    holidays = {value.strip() for value in config.trading_holidays.split(",") if value.strip()}
+    if day > india_today():
+        raise FeedError("FUTURE_TRADE_DATE")
+    for _ in range(15):
+        if day.year != config.trading_calendar_year:
+            raise FeedError("TRADING_CALENDAR_REQUIRED")
+        if day.weekday() < 5 and day.isoformat() not in holidays:
+            return day
+        day -= timedelta(days=1)
+    raise FeedError("TRADING_DATE_NOT_FOUND")
+
+
 async def collect(db, run, counts, download=ex.download):
     deadline = time.monotonic() + 170
     config, today = settings(), india_today()
     if (run.parameters or {}).get("trade_date"):
         today = date.fromisoformat(run.parameters["trade_date"])
     kinds = PIPELINE_JOBS[run.job_name][2]
-    if "prices" in kinds and (
-        today.weekday() >= 5 or today.isoformat() in config.trading_holidays.split(",")
-    ):
-        return "NOT_A_TRADING_DAY"
-    if "prices" in kinds and config.trading_calendar_year != today.year:
-        return "TRADING_CALENDAR_REQUIRED"
+    if "prices" in kinds:
+        requested = today
+        try:
+            today = latest_trading_day(today, config)
+        except FeedError as exc:
+            error(db, run, "calendar", "prices", exc)
+            counts["failed"] += 1
+            return str(exc)
+        run.parameters = {
+            **(run.parameters or {}),
+            "requested_date": requested.isoformat(),
+            "resolved_trade_date": today.isoformat(),
+        }
+    if "ipos" in kinds and config.ipo_data_provider == "ipoalerts":
+        from packages.providers.ipo import get_ipo_provider
+
+        provider = get_ipo_provider(config)
+        try:
+            async for batch in provider.batches(deadline):
+                await store_batch(
+                    db,
+                    run,
+                    provider.name,
+                    provider.authority,
+                    batch.url,
+                    batch.raw,
+                    batch.records,
+                    batch.errors,
+                    counts,
+                )
+        except Exception as exc:
+            counts["failed"] += 1
+            error(db, run, provider.name, "ipos", exc)
+    direct_ipos = config.ipo_data_provider == "exchange"
     if config.exchange_direct_enabled:
         requests = []
-        if "ipos" in kinds:
+        if "ipos" in kinds and direct_ipos:
             requests = [("NSE", ex.NSE_IPO, False), ("NSE", ex.NSE_UPCOMING, True)]
+        elif "subscriptions" in kinds and not config.nse_subscription_categories_enabled:
+            # Catalogue ownership must not disable independent subscription observations.
+            requests = [("NSE", ex.NSE_IPO, False)]
         elif "prices" in kinds:
             identities = await tracked_identifiers(db)
             if not any(identities.values()):
@@ -204,13 +272,20 @@ async def collect(db, run, counts, download=ex.download):
                     if "ipos" in kinds
                     else ex.parse_bhavcopy(content, exchange, today, identities, m.now())
                 )
+                if "subscriptions" in kinds and not direct_ipos:
+                    raw, records, errors = parsed
+                    parsed = (
+                        raw,
+                        [(kind, value) for kind, value in records if kind == "subscriptions"],
+                        errors,
+                    )
                 await store_batch(db, run, exchange, exchange, url, *parsed, counts)
             except Exception as exc:
                 counts["failed"] += 1
                 if isinstance(exc, FeedError) and exc.raw:
                     await raw_payload(db, exchange, kinds[0], url, exc.raw)
                 error(db, run, exchange, url, exc)
-        if "ipos" in kinds:
+        if "ipos" in kinds and direct_ipos:
             from packages.providers.bse_ipo import BSE_LIST_URL, parse_issues
 
             try:
@@ -230,6 +305,8 @@ async def collect(db, run, counts, download=ex.download):
                 }:
                     exc = FeedError("BSE_ACCESS_REDIRECT")
                 error(db, run, "BSE", "ipos:" + BSE_LIST_URL, exc)
+        if "subscriptions" in kinds and config.nse_subscription_categories_enabled:
+            await collect_nse_categories(db, run, counts, download, deadline)
         if "subscriptions" in kinds:
             from packages.providers.bse_ipo import BseIpoProvider
             from packages.providers.bse_ipo import configuration as bse_configuration
@@ -256,7 +333,7 @@ async def collect(db, run, counts, download=ex.download):
                         )
                     error(db, run, "BSE", "subscriptions", exc)
         for source in ex.discovery_sources(config.exchange_sources_json):
-            if source.kind not in kinds:
+            if source.kind not in kinds or (source.kind == "ipos" and not direct_ipos):
                 continue
             try:
                 await collect_discovery(db, run, source, counts, download, deadline)
@@ -265,7 +342,7 @@ async def collect(db, run, counts, download=ex.download):
                 error(db, run, source.name, source.kind, exc)
     # Existing approved feeds remain useful for unofficial GMP and optional provider mappings.
     for kind, providers in configuration(config.market_feeds_json).items():
-        if kind not in kinds:
+        if kind not in kinds or (kind == "ipos" and config.ipo_data_provider == "ipoalerts"):
             continue
         for name, source in providers.items():
             if not source.enabled:
@@ -298,7 +375,89 @@ async def collect(db, run, counts, download=ex.download):
                 if isinstance(exc, FeedError) and exc.raw is not None:
                     await raw_payload(db, name, kind, source.url, exc.raw)
                 error(db, run, name, kind, exc)
+    if "subscriptions" in kinds and not (
+        (config.exchange_direct_enabled and config.nse_subscription_categories_enabled)
+        or any(
+            feed.enabled
+            for feed in configuration(config.market_feeds_json).get("subscriptions", {}).values()
+        )
+        or (
+            config.exchange_direct_enabled
+            and (
+                json.loads(config.bse_ipo_issues_json or "[]")
+                or any(
+                    source.kind == "subscriptions"
+                    for source in ex.discovery_sources(config.exchange_sources_json)
+                )
+            )
+        )
+    ):
+        error(
+            db,
+            run,
+            "configuration",
+            "subscriptions:categories",
+            FeedError("SUBSCRIPTION_CATEGORIES_NOT_CONFIGURED"),
+        )
     return None if counts["providers"] or counts["failed"] else "SOURCE_CONFIGURATION_REQUIRED"
+
+
+async def collect_nse_categories(db, run, counts, download, deadline):
+    from packages.providers import nse_subscriptions as source
+
+    today = india_today()
+    targets = {}
+    for (symbol,) in (
+        await db.execute(
+            select(m.Identifier.ticker)
+            .join(m.Company, m.Company.id == m.Identifier.company_id)
+            .join(m.IPO, m.IPO.company_id == m.Company.id)
+            .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+            .where(
+                m.Identifier.exchange == "NSE",
+                m.Company.is_demo.is_(False),
+                m.IPODate.open_date <= today,
+                m.IPODate.close_date >= today - timedelta(days=3),
+            )
+        )
+    ).all():
+        targets[symbol] = {"nse_symbol": symbol}
+    # Also collect newly discovered issues before their staged master is published.
+    for row in (
+        await db.scalars(
+            select(m.MarketStage).where(
+                m.MarketStage.kind == "ipos", m.MarketStage.status == "PENDING"
+            )
+        )
+    ).all():
+        data = row.data
+        symbol = data.get("nse_symbol")
+        opened, closed = data["issue"].get("open_date"), data["issue"].get("close_date")
+        if (
+            symbol
+            and opened
+            and closed
+            and date.fromisoformat(opened) <= today
+            and date.fromisoformat(closed) >= today - timedelta(days=3)
+        ):
+            targets[symbol] = {"nse_symbol": symbol}
+    for symbol, identity in sorted(targets.items()):
+        try:
+            if time.monotonic() >= deadline:
+                raise FeedError("COLLECTION_TIME_BUDGET_RETRY")
+            parsed = source.parse(await download(source.url(symbol)), symbol, identity)
+            await store_batch(
+                db, run, "NSE_CONSOLIDATED", "NSE", source.url(symbol), *parsed, counts
+            )
+        except Exception as exc:
+            counts["failed"] += 1
+            if isinstance(exc, FeedError) and exc.raw:
+                await raw_payload(
+                    db, "NSE_CONSOLIDATED", "subscriptions", source.url(symbol), exc.raw
+                )
+            error(db, run, "NSE_CONSOLIDATED", "subscriptions:" + symbol, exc)
+            if time.monotonic() >= deadline:
+                break
 
 
 async def collect_discovery(db, run, source, counts, download, deadline):
@@ -400,6 +559,16 @@ async def publish(db, run, counts):
     # Create IPO masters before their subscriptions; prefer NSE before BSE for prices.
     rows.sort(key=lambda r: (kinds.index(r.kind), 0 if r.authority == "NSE" else 1, r.created_at))
     for row in rows:
+        from packages.providers.ipo import primary_ipo_provider
+
+        primary = primary_ipo_provider(settings())
+        if row.kind == "ipos" and (
+            (primary and row.provider != primary)
+            or (settings().ipo_data_provider == "exchange" and row.provider == "IPOALERTS")
+        ):
+            row.status, row.published_at = "FALLBACK_NOT_NEEDED", m.now()
+            counts["unchanged"] += 1
+            continue
         counts["fetched"] += 1
         try:
             async with db.begin_nested():
@@ -478,8 +647,9 @@ async def publish(db, run, counts):
                 row.status, row.published_at, row.error = "PUBLISHED", m.now(), None
                 counts["written" if changed else "unchanged"] += 1
         except Exception as exc:
-            row.status, row.error = "REJECTED", (
-                str(exc)[:100] if isinstance(exc, FeedError) else type(exc).__name__
+            row.status, row.error = (
+                "REJECTED",
+                (str(exc)[:100] if isinstance(exc, FeedError) else type(exc).__name__),
             )
             counts["failed"] += 1
             error(db, run, row.provider, record_context(row.kind, row.data), exc)
@@ -524,7 +694,9 @@ async def run_pipeline(db, run, download=ex.download):
         run.status = (
             ("PARTIAL" if counts["providers"] else "FAILED")
             if counts["failed"]
-            else "SUCCESS" if counts["providers"] else "SKIPPED"
+            else "SUCCESS"
+            if counts["providers"]
+            else "SKIPPED"
         )
         run.error = note
     except Exception as exc:

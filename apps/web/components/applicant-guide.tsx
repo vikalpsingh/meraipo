@@ -100,6 +100,7 @@ function Points({ text }: { text: string | null | undefined }) {
 
 export function ApplicantGuide({ company: c }: { company: Company }) {
   const g = c.applicant_guide;
+  const provider = c.provider_details;
   const verified = g?.verification_status === 'VERIFIED' && !c.is_demo;
   return (
     <>
@@ -109,16 +110,17 @@ export function ApplicantGuide({ company: c }: { company: Company }) {
         <h2>The company in 60 seconds</h2>
         <p className="brief-lead">
           {g?.business_summary ||
+            provider?.about ||
             'The business summary is awaiting editorial review. Read the original prospectus before making a decision.'}
         </p>
         <div className="brief-columns">
           <div>
             <h3>What supports the business</h3>
-            <Points text={g?.strengths} />
+            <Points text={g?.strengths || provider?.strengths.join('\n')} />
           </div>
           <div>
             <h3>What could go wrong</h3>
-            <Points text={g?.risks} />
+            <Points text={g?.risks || provider?.risks.join('\n')} />
           </div>
         </div>
         <details>
@@ -139,6 +141,15 @@ export function ApplicantGuide({ company: c }: { company: Company }) {
             · Reviewed {date(g.reviewed_on)} ·{' '}
             <a href={g.source_url} target="_blank" rel="noreferrer">
               Read the source ↗
+            </a>
+          </p>
+        )}
+        {provider && (
+          <p className="guide-source">
+            Provider content · {provider.provider} · Not independently reviewed · Retrieved{' '}
+            {timestamp(provider.fetched_at)} ·{' '}
+            <a href={provider.source_url} target="_blank" rel="noreferrer">
+              Data source ↗
             </a>
           </p>
         )}
@@ -182,6 +193,22 @@ export function ApplicantGuide({ company: c }: { company: Company }) {
             Import these dates into your calendar. Saved dates will not update automatically if the
             schedule changes.
           </p>
+          {!!provider?.schedule.length && (
+            <details>
+              <summary>Full provider schedule</summary>
+              <ul>
+                {provider.schedule.map((item, index) => (
+                  <li key={index}>
+                    {item.event}: {date(item.date)}
+                  </li>
+                ))}
+              </ul>
+              <p className="screen-note">
+                Dates supplied by {provider.provider}; no deadline time was provided. Check the
+                issue source.
+              </p>
+            </details>
+          )}
           <div className="allotment-action">
             <h3>Did you get shares?</h3>
             {verified && g?.registrar_url && g.registrar_name ? (

@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import './globals.css';
 import { SiteNavigation } from '@/components/site-navigation';
+import { features } from '@/lib/features';
+import { Brand } from '@/components/brand';
 const origin = process.env.SITE_URL || 'http://localhost:3000';
 export const metadata: Metadata = {
   metadataBase: new URL(origin),
@@ -16,7 +18,8 @@ export const metadata: Metadata = {
   twitter: { card: 'summary' },
   icons: { icon: '/favicon.svg' },
 };
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default async function Layout({ children }: { children: React.ReactNode }) {
+  const flags = await features();
   return (
     <html lang="en">
       <body>
@@ -25,13 +28,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </a>
         <header className="site-header">
           <Link href="/" className="brand" aria-label="MeraIPO home">
-            <span className="brand-mark">m</span>
-            <span>
-              Mera<span className="brand-accent">IPO</span>
-              <small>From IPO to Value Creator</small>
-            </span>
+            <Brand />
           </Link>
-          <SiteNavigation />
+          <SiteNavigation trackerEnabled={flags.ipo_tracker === true} />
           <span className="header-label">INDIA · LONG-TERM RESEARCH</span>
         </header>
         {process.env.NEXT_PUBLIC_DEMO_MODE === 'true' && (
@@ -44,8 +43,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
         <footer>
           <div className="footer-top">
-            <Link className="brand" href="/">
-              Mera<span className="brand-accent">IPO</span>
+            <Link className="brand" href="/" aria-label="MeraIPO home">
+              <Brand />
             </Link>
             <nav aria-label="Information">
               {['methodology', 'data-sources', 'disclaimer', 'privacy', 'terms', 'contact'].map(

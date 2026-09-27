@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { features } from '@/lib/features';
 import { api } from '@/lib/api';
 import { money, percent, date, human, fiscalToday } from '@/lib/format';
 import type { TrackerResult, Advertisement } from '@/lib/types';
@@ -20,6 +22,7 @@ export default async function Tracker({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const input = await searchParams;
+  if (!(await features()).ipo_tracker) notFound();
   const today = fiscalToday();
   const query = new URLSearchParams();
   for (const [k, v] of Object.entries(input)) if (v !== undefined) query.set(k, v);

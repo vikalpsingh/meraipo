@@ -22,6 +22,7 @@ from packages.providers.market import (
 )
 from packages.shared.calculations import utc
 from packages.shared.config import settings
+from packages.shared.ipo_lifecycle import lifecycle, public_status
 
 JOBS = {
     "ipo-master": ("IPO discovery", "07:00 daily", ["ipos"]),
@@ -49,36 +50,6 @@ def india_today():
     return m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
 
 
-def lifecycle(ipo, dates, guide, today):
-    if ipo.raw_status in ("WITHDRAWN", "CANCELLED"):
-        return ipo.raw_status
-    if dates and dates.listing_date and today >= dates.listing_date:
-        return "LISTING_TODAY" if today == dates.listing_date else "LISTED"
-    if ipo.raw_status == "LISTED":
-        return "LISTED"
-    if dates and dates.open_date and today < dates.open_date:
-        return "UPCOMING"
-    if (
-        dates
-        and dates.open_date
-        and dates.close_date
-        and dates.open_date <= today <= dates.close_date
-    ):
-        return "OPEN"
-    if dates and dates.close_date and today > dates.close_date:
-        if dates.allotment_date:
-            return "ALLOTMENT_COMPLETED" if today >= dates.allotment_date else "ALLOTMENT_PENDING"
-        if guide and guide.schedule_status == "CONFIRMED" and guide.allotment_date:
-            return "ALLOTMENT_COMPLETED" if today >= guide.allotment_date else "ALLOTMENT_PENDING"
-        return "CLOSED"
-    return (
-        ipo.raw_status
-        if ipo.raw_status
-        in ("LISTED", "OPEN", "UPCOMING", "CLOSED", "ALLOTMENT_PENDING", "ALLOTMENT_COMPLETED")
-        else "ANNOUNCED"
-    )
-
-
 async def reconcile_lifecycle(db, today):
     rows = (
         await db.execute(
@@ -92,14 +63,7 @@ async def reconcile_lifecycle(db, today):
         if not ipo.source_provider:
             continue
         ipo.lifecycle = lifecycle(ipo, dates, guide, today)
-        ipo.status = {
-            "LISTING_TODAY": "LISTED",
-            "ANNOUNCED": "UPCOMING",
-            "ALLOTMENT_PENDING": "CLOSED",
-            "ALLOTMENT_COMPLETED": "CLOSED",
-            "WITHDRAWN": "CLOSED",
-            "CANCELLED": "CLOSED",
-        }.get(ipo.lifecycle, ipo.lifecycle)
+        ipo.status = public_status(ipo.lifecycle)
     await db.flush()
 
 
@@ -118,6 +82,33 @@ async def match_company(db, data):
             )
             if found:
                 matches.add(found)
+    # Migrate legacy NSE catalogue mirrors originally stored under BSE_SYMBOL.
+    # The exact symbol, issuer name, board and bidding window must all agree;
+    # a name alone or a symbol reused in another issue never authorizes a merge.
+    if data.provider_namespace and data.nse_symbol and hasattr(data, "issue"):
+        candidates = (
+            await db.execute(
+                select(m.Company, m.IPO, m.IPODate)
+                .join(m.Identifier, m.Identifier.company_id == m.Company.id)
+                .join(m.IPO, m.IPO.company_id == m.Company.id)
+                .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+                .where(
+                    m.Identifier.exchange == "BSE_SYMBOL",
+                    m.Identifier.ticker == data.nse_symbol,
+                    m.IPO.source_provider == "NSE",
+                )
+            )
+        ).all()
+        for candidate, _, dates in candidates:
+            if (
+                candidate.name.strip().casefold() == data.issue.name.strip().casefold()
+                and candidate.board == data.issue.board
+                and data.issue.open_date is not None
+                and data.issue.close_date is not None
+                and dates.open_date == data.issue.open_date
+                and dates.close_date == data.issue.close_date
+            ):
+                matches.add(candidate.id)
     if len(matches) > 1:
         raise FeedError("IDENTIFIER_CONFLICT")
     company = await db.get(m.Company, next(iter(matches))) if matches else None
@@ -151,7 +142,7 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
         # A provider polling timestamp is not a new financial revision.
         digest = fingerprint(data.model_dump(mode="json", exclude={"source_timestamp"}))
     if kind == "ipos":
-        if not company and data.bse_issue_id:
+        if not company and (data.bse_issue_id or data.provider_id):
             # Names only flag ambiguous candidates; they never authorize a merge.
             possible = await db.scalar(
                 select(m.Company.id)
@@ -171,7 +162,10 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
             if not ipo:
                 raise FeedError("IPO_MAPPING_MISSING")
             # Conflicting sources are retained for review. Same source can advance dates/status.
-            if ipo.source_provider != provider:
+            from packages.providers.ipo import primary_ipo_provider
+
+            selected_primary = primary_ipo_provider(settings()) == provider
+            if ipo.source_provider != provider and not selected_primary:
                 for key in (
                     "price_low",
                     "price_high",
@@ -204,7 +198,7 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
                     "provider": provider,
                     "source_url": data.source_url,
                     "source_timestamp": data.source_timestamp,
-                    "verification_status": "VERIFIED",
+                    "verification_status": "UNVERIFIED" if authority == "LICENSED" else "VERIFIED",
                     "baseline": None,
                     "ticker": None,
                 }
@@ -226,13 +220,20 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
             for key in ("open_date", "close_date", "listing_date"):
                 if dates and getattr(values, key) is None:
                     setattr(values, key, getattr(dates, key))
+            if values.board == "Unknown":
+                values.board = company.board
+            sector = await db.get(m.Sector, company.sector_id) if company.sector_id else None
+            if values.sector == "Unclassified" and sector:
+                values.sector = sector.name
+            values.screener_url = values.screener_url or company.screener_url
+            values.exchange_url = values.exchange_url or company.exchange_url
             await maintain_ipo(db, values, None, company.slug)
         else:
             values = data.issue.model_copy(
                 update={
                     "provider": provider,
                     "source_url": data.source_url,
-                    "verification_status": "VERIFIED",
+                    "verification_status": "UNVERIFIED" if authority == "LICENSED" else "VERIFIED",
                     "ticker": None,
                 }
             )
@@ -255,6 +256,16 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
         for key in ("anchor_date", "allotment_date", "refund_date", "demat_credit_date"):
             if getattr(data, key) is not None:
                 setattr(dates, key, getattr(data, key))
+        if data.provider_details is not None:
+            detail = await db.scalar(
+                select(m.IPOProviderDetail).where(m.IPOProviderDetail.ipo_id == ipo.id)
+            )
+            if not detail:
+                detail = m.IPOProviderDetail(ipo_id=ipo.id)
+                db.add(detail)
+            detail.provider, detail.source_url = provider, data.source_url
+            detail.data = data.provider_details.model_dump(mode="json")
+            detail.fetched_at, detail.raw_payload_id = data.source_timestamp, raw_id
         await remember_identifiers(db, company, data)
         ipo.raw_status, ipo.source_provider, ipo.source_timestamp = (
             data.official_status.upper(),
@@ -362,8 +373,9 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
             db.add(snapshot)
         snapshot.cmp, snapshot.price_date = latest.close, latest.price_date
         snapshot.ath = max(p.high or p.close for p in history)
-        snapshot.high_52w, snapshot.low_52w = max(p.high or p.close for p in recent), min(
-            p.low or p.close for p in recent
+        snapshot.high_52w, snapshot.low_52w = (
+            max(p.high or p.close for p in recent),
+            min(p.low or p.close for p in recent),
         )
     elif kind == "results":
         table = m.Quarterly if data.period_type == "QUARTERLY" else m.Annual
@@ -643,7 +655,9 @@ async def run_job(db, run, fetch=fetch_feed):
         run.status = (
             ("PARTIAL" if counters["providers"] else "FAILED")
             if counters["failed"]
-            else "SUCCESS" if counters["providers"] else "SKIPPED"
+            else "SUCCESS"
+            if counters["providers"]
+            else "SKIPPED"
         )
         if notes and run.status == "SUCCESS":
             run.status = "PARTIAL"

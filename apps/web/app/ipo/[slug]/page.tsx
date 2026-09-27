@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { features } from '@/lib/features';
 import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { money, number, percent, date, timestamp, human } from '@/lib/format';
@@ -55,6 +56,7 @@ export default async function Journey({
   searchParams: Promise<{ fy?: string }>;
 }) {
   const [{ slug }, query] = await Promise.all([params, searchParams]);
+  const trackerEnabled = (await features()).ipo_tracker;
   const c = await getCompany(slug);
   const years = [...new Set(c.quarters.map((q) => q.financial_year))].sort((a, b) => b - a);
   const year = query.fy ? Number(query.fy) : null;
@@ -80,8 +82,8 @@ export default async function Journey({
   return (
     <main>
       <div className="breadcrumb">
-        <Link href={c.status === 'LISTED' ? '/tracker' : '/'}>
-          {c.status === 'LISTED' ? 'IPO Tracker' : 'IPO Now'}
+        <Link href={c.status === 'LISTED' && trackerEnabled ? '/tracker' : '/'}>
+          {c.status === 'LISTED' && trackerEnabled ? 'IPO Tracker' : 'IPO Now'}
         </Link>{' '}
         / {c.name}
       </div>

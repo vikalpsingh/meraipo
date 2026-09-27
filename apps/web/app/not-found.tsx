@@ -4,8 +4,8 @@ export default function NotFound() {
     <main className="empty">
       <h1>Company or page not found.</h1>
       <p>This record may not be available yet.</p>
-      <Link className="primary-button" href="/tracker">
-        Back to IPO Tracker
+      <Link className="primary-button" href="/">
+        Back to Home
       </Link>
     </main>
   );

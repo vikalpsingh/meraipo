@@ -132,7 +132,13 @@ export function CompanyPreview({
                           ? 'Non-institutional (NII)'
                           : human(key)}
                     </th>
-                    <td>{multiple == null ? 'Not reported' : `${number(multiple * 100)}%`}</td>
+                    <td>
+                      {multiple == null
+                        ? c.subscription?.categories?.[key]?.gap_note
+                          ? '—**'
+                          : 'Not reported'
+                        : `${number(multiple * 100)}%`}
+                    </td>
                     <td>{multiple == null ? '—' : `${number(multiple)}×`}</td>
                     <td>
                       {c.subscription?.categories?.[key]?.source_provider || '—'}
@@ -148,6 +154,26 @@ export function CompanyPreview({
             </tbody>
           </table>
         </div>
+        <div style={{ whiteSpace: 'normal' }}>
+          {[
+            ...new Set(
+              Object.values(c.subscription?.categories || {})
+                .map((category) => category.gap_note)
+                .filter(Boolean),
+            ),
+          ].map((note) => (
+            <p className="small" key={note}>
+              ** {note}
+            </p>
+          ))}
+        </div>
+        {c.board === 'SME' &&
+          Object.values(c.subscription?.categories || {}).some((category) => category.gap_note) && (
+            <p className="small" style={{ whiteSpace: 'normal' }}>
+              ** SME individual-investor bids are not a verified retail allocation. Category
+              percentages require the offered shares reserved for that specific category.
+            </p>
+          )}
         {c.subscription && (
           <p className="small">
             Updated {timestamp(c.subscription.observed_at)} ·{' '}

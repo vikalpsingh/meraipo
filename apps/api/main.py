@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import date
 from typing import Literal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +17,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.api import cache, schemas, security, services
 from apps.api import repository as repo
+from apps.api.feature_routes import require_feature
+from apps.api.feature_routes import router as feature_router
 from apps.api.feedback_routes import router as feedback_router
 from apps.api.market_routes import router as market_router
 from packages.database import models as m
@@ -43,6 +46,8 @@ app = FastAPI(
     openapi_url=None if settings().environment == "production" else "/openapi.json",
     lifespan=lifespan,
 )
+
+app.include_router(feature_router)
 app.include_router(market_router, prefix="/api/v1")
 app.include_router(feedback_router, prefix="/api/v1")
 
@@ -189,9 +194,10 @@ async def ready(db: AsyncSession = Depends(get_session)):
 
 
 async def read_catalog(db):
+    today = m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
     if settings().environment == "test":
-        return await repo.catalog(db)
-    return await cache.cached("catalog", lambda: repo.catalog(db))
+        return await repo.catalog(db, today)
+    return await cache.cached(f"catalog:{today.isoformat()}", lambda: repo.catalog(db, today))
 
 
 @app.get("/api/v1/ipos/{status}")
@@ -208,7 +214,7 @@ async def ipos(status: str, db: AsyncSession = Depends(get_session)):
     }
 
 
-@app.get("/api/v1/tracker")
+@app.get("/api/v1/tracker", dependencies=[Depends(require_feature("ipo_tracker"))])
 async def tracker(
     fy: int | None = Query(None, ge=2000, le=2100),
     quarter: int | None = Query(None, ge=1, le=4),
@@ -487,6 +493,9 @@ async def dashboard(auth=Depends(security.admin), db: AsyncSession = Depends(get
         "missing_results": sum(c["status"] == "LISTED" and not c["latest"] for c in items),
         "missing_symbols": sum(not c["ticker"] for c in items),
         "missing_ipo_data": sum(c["price_high"] is None for c in items),
+        "missing_gmp": sum(
+            c["status"] in {"OPEN", "UPCOMING"} and c["gmp"] is None for c in items
+        ),
         "stale_gmp": sum(c["gmp_quality"] == "STALE" for c in items),
         "stale_prices": sum(
             c["status"] == "LISTED"

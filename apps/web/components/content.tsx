@@ -1,3 +1,5 @@
+import { indiaDay } from '@/lib/applicant';
+import { ipoStatus } from '@/lib/ipo-status';
 import Image from 'next/image';
 import Link from 'next/link';
 import { CompanyPreview } from './company-preview';
@@ -62,16 +64,22 @@ export function Trust({ company }: { company: Company }) {
     </span>
   );
 }
-export function IPOCard({ company: c }: { company: Company }) {
+export function IPOCard({ company: c, today = indiaDay() }: { company: Company; today?: string }) {
+  const status = ipoStatus(c, today);
   return (
-    <article className="ipo-card">
+    <article className={`ipo-card ipo-tone-${status.tone}`}>
       <div className="card-top">
-        <span className="company-icon">{c.name.slice(0, 2).toUpperCase()}</span>
+        <span className={`ipo-status ipo-tone-${status.tone}`}>{status.label}</span>
         <Trust company={c} />
       </div>
       <CompanyPreview company={c} heading />
       <p>
-        {c.board === 'SME' ? 'SME' : 'EQ · Mainboard'} · {c.sector}
+        {c.board === 'SME'
+          ? 'SME'
+          : c.board === 'Mainboard'
+            ? 'EQ · Mainboard'
+            : 'Type not announced'}{' '}
+        · {c.sector}
       </p>
       <p className="dates">
         {date(c.open_date)} – {date(c.close_date)}
@@ -86,9 +94,17 @@ export function IPOCard({ company: c }: { company: Company }) {
           </dd>
         </div>
         <div>
-          <dt>Minimum application</dt>
+          <dt>
+            {c.minimum_application == null && c.provider_details?.minimum_amount
+              ? 'Provider minimum'
+              : 'Minimum application'}
+          </dt>
           <dd>
-            {c.minimum_application === null ? 'To be announced' : money(c.minimum_application)}
+            {c.minimum_application === null
+              ? c.provider_details?.minimum_amount
+                ? money(Number(c.provider_details.minimum_amount))
+                : 'To be announced'
+              : money(c.minimum_application)}
           </dd>
         </div>
         <div>

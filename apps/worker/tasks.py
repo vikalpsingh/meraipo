@@ -29,7 +29,7 @@ celery.conf.update(
             name: {"task": "meraipo.scheduled_market", "schedule": schedule, "args": [name]}
             for name, schedule in {
                 "sync-ipos": crontab(hour=23, minute=0),
-                "sync-prices": crontab(hour=23, minute=10, day_of_week="1-5"),
+                "sync-prices": crontab(hour=23, minute=10),
                 "sync-results": crontab(hour=21, minute=0, day_of_week="5"),
             }.items()
         }

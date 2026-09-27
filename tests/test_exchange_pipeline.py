@@ -191,7 +191,9 @@ async def test_failed_download_retains_published_data(db, monkeypatch):
     assert (await db.get(m.IPO, ipo.id)).issue_price == 100
     assert (
         await db.scalar(
-            select(func.count()).select_from(m.JobError).where(m.JobError.run_id == run.id)
+            select(func.count())
+            .select_from(m.JobError)
+            .where(m.JobError.run_id == run.id, m.JobError.code == "EXCHANGE_HTTP_403")
         )
         == 3
     )

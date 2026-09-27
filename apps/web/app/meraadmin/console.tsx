@@ -6,6 +6,7 @@ import { GuideEditor } from '@/components/guide-editor';
 import { MarketConsole } from '@/components/market-console';
 import { JobErrorLog } from '@/components/job-error-log';
 import { FeedbackInbox } from '@/components/feedback-inbox';
+import { FeatureControls } from '@/components/feature-controls';
 type Session = { email: string; csrf_token: string };
 type Dashboard = {
   companies: Company[];
@@ -17,6 +18,7 @@ type Dashboard = {
   missing_results: number;
   missing_symbols: number;
   missing_ipo_data: number;
+  missing_gmp: number;
   stale_gmp: number;
   stale_prices: number;
   conflicts: number;
@@ -249,6 +251,7 @@ export default function Console() {
       <nav className="screen-tabs admin-tabs" aria-label="Admin sections">
         {[
           'Dashboard',
+          'Feature releases',
           'Data & scheduler',
           'Customer feedback',
           'IPOs',
@@ -276,6 +279,7 @@ export default function Console() {
       </p>
       {tab === 'Applicant guides' && <GuideEditor companies={companies} busy={busy} save={save} />}
       {tab === 'Customer feedback' && <FeedbackInbox csrf={session.csrf_token} />}
+      {tab === 'Feature releases' && <FeatureControls csrf={session.csrf_token} />}
       {tab === 'Data & scheduler' && session && (
         <MarketConsole csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
@@ -290,6 +294,7 @@ export default function Console() {
                 'missing_results',
                 'missing_symbols',
                 'missing_ipo_data',
+                'missing_gmp',
                 'stale_gmp',
                 'stale_prices',
                 'conflicts',

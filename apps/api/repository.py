@@ -1,6 +1,7 @@
 from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from packages.database import models as m
 from packages.shared.calculations import (
@@ -14,6 +15,7 @@ from packages.shared.calculations import (
     valuation_label,
 )
 from packages.shared.config import settings
+from packages.shared.ipo_lifecycle import lifecycle, public_status
 
 METRICS = ("revenue", "ebitda", "pat", "eps", "debt", "cfo", "roe", "roce")
 
@@ -31,12 +33,45 @@ def subscription_view(row):
     }
 
 
+def explain_subscription_gaps(result):
+    """Expose missing denominators without inventing a category allocation."""
+    categories = {key: dict(value) for key, value in (result.get("categories") or {}).items()}
+    for key in ("retail", "qib", "nii", "total"):
+        category = categories.setdefault(key, {"multiple": None})
+        if category.get("multiple") is None:
+            category["gap_note"] = (
+                "Verified offered shares for this category are unavailable or reported as zero. "
+                "No percentage is calculated; the whole IPO share count is not used as a substitute."
+                if key != "total"
+                else "The source does not provide a usable total offered-share count for this snapshot. "
+                "The total percentage cannot be verified."
+            )
+    result["categories"] = categories
+    return result
+
+
 def merge_subscriptions(rows):
     from decimal import Decimal
     from zoneinfo import ZoneInfo
 
     if not rows:
         return None
+    consolidated = [r for r in rows if r.source_provider == "NSE_CONSOLIDATED"]
+    if consolidated:
+        # All-exchange counts are a coherent snapshot, not additive to exchange-only figures.
+        row = max(consolidated, key=lambda r: utc(r.observed_at))
+        result = subscription_view(row)
+        result["categories"] = {
+            key: {
+                **value,
+                "source_provider": row.source_provider,
+                "source_url": row.source_url,
+                "observed_at": utc(row.observed_at).isoformat(),
+            }
+            for key, value in row.categories.items()
+        }
+        result["source_disagreement"] = False
+        return explain_subscription_gaps(result)
     rows = sorted(rows, key=lambda r: utc(r.observed_at), reverse=True)
     day = utc(rows[0].observed_at).astimezone(ZoneInfo("Asia/Kolkata")).date()
     rows = [
@@ -73,7 +108,7 @@ def merge_subscriptions(rows):
     combined["source_provider"] = " / ".join(
         dict.fromkeys(r.source_provider or "Manual" for r in rows)
     )
-    return combined
+    return explain_subscription_gaps(combined)
 
 
 def metrics(obj):
@@ -95,7 +130,9 @@ def record(obj):
             else (
                 value.isoformat()
                 if isinstance(value, date)
-                else float(value) if isinstance(value, Decimal) else value
+                else float(value)
+                if isinstance(value, Decimal)
+                else value
             )
         )
         for column in obj.__table__.columns
@@ -103,7 +140,8 @@ def record(obj):
     }
 
 
-async def catalog(db):
+async def catalog(db, today=None):
+    today = today or m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
     query = (
         select(m.Company, m.Sector, m.IPO, m.IPODate, m.PriceSnapshot, m.ApplicantGuide)
         .join(m.IPO, m.IPO.company_id == m.Company.id)
@@ -177,10 +215,33 @@ async def catalog(db):
         )
     ).all():
         subscriptions.setdefault(s.ipo_id, []).append(s)
+    provider_details = {
+        detail.ipo_id: detail
+        for detail in (
+            await db.scalars(
+                select(m.IPOProviderDetail).where(m.IPOProviderDetail.ipo_id.in_(ipo_ids))
+            )
+        ).all()
+    }
     identifiers = {
         i.company_id: i
         for i in (
-            await db.scalars(select(m.Identifier).where(m.Identifier.company_id.in_(ids)))
+            await db.scalars(
+                select(m.Identifier)
+                .where(
+                    m.Identifier.company_id.in_(ids),
+                    m.Identifier.exchange.in_(["NSE", "BSE", "BSE_SYMBOL", "BSE_ISSUE"]),
+                )
+                .order_by(
+                    case(
+                        (m.Identifier.exchange == "NSE", 3),
+                        (m.Identifier.exchange == "BSE", 2),
+                        (m.Identifier.exchange == "BSE_SYMBOL", 1),
+                        else_=0,
+                    ),
+                    m.Identifier.ticker,
+                )
+            )
         ).all()
     }
     values = {
@@ -253,9 +314,15 @@ async def catalog(db):
         cmp = numeric(price.cmp) if price else None
         drawdown = numeric(percent_change(cmp, price.ath if price else None))
         listing = dates.listing_date if dates else None
+        current_lifecycle = (
+            lifecycle(ipo, dates, guide, today)
+            if ipo.source_provider
+            else (ipo.lifecycle or ipo.status)
+        )
+        current_status = public_status(current_lifecycle)
         quality = data_quality(
             conflict=company.id in conflicts,
-            missing=not identifier or (ipo.status == "LISTED" and not latest),
+            missing=not identifier or (current_status == "LISTED" and not latest),
             verified=ipo.quality == "VERIFIED",
         )
         result.append(
@@ -265,7 +332,7 @@ async def catalog(db):
                 "slug": company.slug,
                 "name": company.name,
                 "company_type": company.company_type,
-                "lifecycle": ipo.lifecycle or ipo.status,
+                "lifecycle": current_lifecycle,
                 "sector": sector.name if sector else "Unclassified",
                 "board": company.board,
                 "is_demo": company.is_demo,
@@ -281,7 +348,7 @@ async def catalog(db):
                     if identifier
                     else None
                 ),
-                "status": ipo.status,
+                "status": current_status,
                 "quality": quality,
                 "open_date": dates.open_date.isoformat() if dates and dates.open_date else None,
                 "close_date": dates.close_date.isoformat() if dates and dates.close_date else None,
@@ -294,6 +361,16 @@ async def catalog(db):
                 "listing_price": numeric(ipo.listing_price),
                 "lot_size": ipo.lot_size,
                 "applicant_guide": record(guide) if guide else None,
+                "provider_details": (
+                    {
+                        **provider_details[ipo.id].data,
+                        "provider": provider_details[ipo.id].provider,
+                        "source_url": provider_details[ipo.id].source_url,
+                        "fetched_at": provider_details[ipo.id].fetched_at.isoformat(),
+                    }
+                    if ipo.id in provider_details
+                    else None
+                ),
                 "minimum_application": (
                     numeric(ipo.price_high * ipo.lot_size * guide.min_lots)
                     if ipo.price_high is not None
@@ -344,7 +421,9 @@ async def catalog(db):
                         if cmp is not None
                         and ipo.issue_price is not None
                         and cmp >= ipo.issue_price
-                        else " / Price down" if cmp is not None else " / Price pending"
+                        else " / Price down"
+                        if cmp is not None
+                        else " / Price pending"
                     )
                 ),
                 "valuation": record(valuation) if valuation else None,

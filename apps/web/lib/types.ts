@@ -34,6 +34,16 @@ export type Quarter = {
   verification_status: string;
 };
 export type Company = {
+  provider_details?: {
+    provider: string;
+    source_url: string;
+    fetched_at: string;
+    about: string | null;
+    strengths: string[];
+    risks: string[];
+    schedule: { event: string; date: string }[];
+    minimum_amount: string | null;
+  } | null;
   subscription_history?: {
     date: string;
     exchange: string;
@@ -56,6 +66,7 @@ export type Company = {
       string,
       {
         multiple: string | null;
+        gap_note?: string;
         source_provider?: string;
         source_url?: string;
         observed_at?: string;

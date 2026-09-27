@@ -156,22 +156,49 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         for kind, group in feeds.items()
         for name, c in group.items()
     ]
+    if settings().ipo_data_provider == "ipoalerts":
+        providers = [p for p in providers if p["kind"] != "ipos"]
+        providers.append(
+            {
+                "kind": "ipos",
+                "name": "IPOALERTS",
+                "authority": "LICENSED",
+                "enabled": True,
+                "credential_set": bool(settings().ipoalerts_api_key.get_secret_value()),
+            }
+        )
+        providers.append(
+            {
+                "kind": "gmp",
+                "name": "IPOALERTS",
+                "authority": "UNOFFICIAL",
+                "enabled": True,
+                "credential_set": bool(settings().ipoalerts_api_key.get_secret_value()),
+            }
+        )
     if settings().exchange_direct_enabled:
         providers.extend(
             [
                 {
                     "kind": kind,
                     "name": exchange,
-                    "authority": exchange,
+                    "authority": "NSE" if exchange == "NSE_CONSOLIDATED" else exchange,
                     "enabled": True,
                     "credential_set": False,
                 }
                 for kind, exchange in (
                     ("ipos", "NSE"),
                     ("ipos", "BSE"),
+                    (
+                        "subscriptions",
+                        "NSE_CONSOLIDATED"
+                        if settings().nse_subscription_categories_enabled
+                        else "NSE",
+                    ),
                     ("prices", "NSE"),
                     ("prices", "BSE"),
                 )
+                if kind != "ipos" or settings().ipo_data_provider == "exchange"
             ]
         )
         providers.extend(
@@ -202,6 +229,14 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             .order_by(m.RawPayload.created_at.desc())
             .limit(1)
         )
+        if provider["name"] == "IPOALERTS" and provider["kind"] == "gmp":
+            latest = await db.scalar(
+                select(m.RawPayload)
+                .join(m.MarketStage, m.MarketStage.raw_payload_id == m.RawPayload.id)
+                .where(m.MarketStage.provider == "IPOALERTS", m.MarketStage.kind == "gmp")
+                .order_by(m.RawPayload.created_at.desc())
+                .limit(1)
+            )
         failure = await db.scalar(
             select(m.JobError)
             .where(
@@ -226,6 +261,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             holidays=settings().trading_holidays.split(","),
         )
     return {
+        "ipo_data_provider": settings().ipo_data_provider,
         "driver": settings().market_scheduler_driver,
         "staging": {
             state: await db.scalar(
@@ -235,6 +271,14 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         },
         "enabled": settings().market_scheduler_enabled,
         "setup": [
+            {
+                "label": "IPO master data provider",
+                "ready": settings().ipo_data_provider != "ipoalerts"
+                or bool(settings().ipoalerts_api_key.get_secret_value()),
+                "setting": "IPO_DATA_PROVIDER="
+                + settings().ipo_data_provider
+                + "; IPOALERTS_API_KEY stays on backend. GMP uses includeGmp=true when available. NSE consolidated categories are collected independently when direct exchange access is enabled.",
+            },
             {
                 "label": "BSE category subscriptions",
                 "ready": bool(bse_issues),

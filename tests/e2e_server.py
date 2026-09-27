@@ -15,7 +15,10 @@ os.environ["DEMO_MODE"] = "true"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 os.environ["PUBLIC_ORIGIN"] = "http://127.0.0.1:3001"
 os.environ["MARKET_FEEDS_JSON"] = "{}"
+os.environ["IPO_DATA_PROVIDER"] = "exchange"
+os.environ["IPOALERTS_API_KEY"] = ""
 os.environ["EXCHANGE_DIRECT_ENABLED"] = "false"
+os.environ["NSE_SUBSCRIPTION_CATEGORIES_ENABLED"] = "false"
 os.environ["EXCHANGE_SOURCES_JSON"] = "[]"
 os.environ["BSE_IPO_ISSUES_JSON"] = "[]"
 os.environ["MARKET_SCHEDULER_ENABLED"] = "false"
@@ -36,6 +39,9 @@ from packages.database.session import Session, engine
 async def prepare():
     async with Session() as db:
         await seed(db)
+        from packages.database.models import FeatureFlag
+        db.add(FeatureFlag(key="ipo_tracker", enabled=True))
+        await db.commit()
         from tests.market_browser_fixtures import seed_market_browser
 
         await seed_market_browser(db)
