@@ -405,6 +405,16 @@ class SchedulerControl(Base):
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class MarketConfiguration(Base):
+    __tablename__ = "market_configuration"
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="market")
+    values: Mapped[dict] = mapped_column(JSON, default=dict)
+    ipoalerts_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    market_feeds_json_encrypted: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("admin_users.id"))
+
+
 class JobError(Entity, Base):
     __tablename__ = "ingestion_job_errors"
     run_id: Mapped[str] = mapped_column(ForeignKey("data_import_runs.id"), index=True)

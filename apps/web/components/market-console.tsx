@@ -147,10 +147,10 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
             <details>
               <summary>Provider setup and safety</summary>
               <p>
-                Set provider URLs and credentials in the API and worker environment, then restart
-                both services. NSE/BSE provide exchange data; GMP needs a separate unofficial source
-                or an admin entry. Financial filings need a reviewed source mapping and XBRL
-                taxonomy.
+                Use the Config tab to manage provider URLs, encrypted credentials, exchange access,
+                and the trading calendar. New job runs load saved values automatically. NSE/BSE
+                provide exchange data; GMP needs a separate unofficial source or an admin entry.
+                Financial filings need a reviewed source mapping and XBRL taxonomy.
               </p>
               {data.providers.length ? (
                 <ul>

@@ -176,6 +176,34 @@ class LoginInput(Input):
     password: str = Field(min_length=1, max_length=256)
 
 
+class MarketConfigurationInput(Input):
+    provider_mode: Literal["manual", "market-feeds"]
+    market_scheduler_enabled: bool
+    market_scheduler_driver: Literal["celery", "vercel"]
+    exchange_direct_enabled: bool
+    nse_subscription_categories_enabled: bool
+    ipo_data_provider: Literal["exchange", "ipoalerts", "feed"]
+    ipoalerts_api_key: str | None = Field(None, max_length=500)
+    clear_ipoalerts_api_key: bool = False
+    ipoalerts_page_size: int = Field(ge=1, le=100)
+    market_feeds_json: str = Field(max_length=100000)
+    exchange_sources_json: str = Field(max_length=100000)
+    bse_ipo_issues_json: str = Field(max_length=100000)
+    trading_holidays: str = Field(max_length=10000)
+    trading_calendar_year: int = Field(ge=0, le=2100)
+
+    @field_validator("market_feeds_json", "exchange_sources_json", "bse_ipo_issues_json")
+    @classmethod
+    def valid_json(cls, value):
+        import json
+
+        try:
+            json.loads(value)
+        except ValueError as exc:
+            raise ValueError("Enter valid JSON") from exc
+        return value
+
+
 class PriceInput(ProvenanceInput):
     price_date: date
     close: Decimal = Field(gt=0, max_digits=20, decimal_places=4)

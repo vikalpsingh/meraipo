@@ -4,6 +4,7 @@ import type { Company, SiteMessage, Advertisement } from '@/lib/types';
 import { human, timestamp } from '@/lib/format';
 import { GuideEditor } from '@/components/guide-editor';
 import { MarketConsole } from '@/components/market-console';
+import { MarketConfig } from '@/components/market-config';
 import { JobErrorLog } from '@/components/job-error-log';
 import { FeedbackInbox } from '@/components/feedback-inbox';
 import { FeatureControls } from '@/components/feature-controls';
@@ -253,6 +254,7 @@ export default function Console() {
           'Dashboard',
           'Feature releases',
           'Data & scheduler',
+          'Config',
           'Customer feedback',
           'IPOs',
           'Applicant guides',
@@ -283,6 +285,7 @@ export default function Console() {
       {tab === 'Data & scheduler' && session && (
         <MarketConsole csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
+      {tab === 'Config' && session && <MarketConfig csrf={session.csrf_token} />}
       {tab === 'Dashboard' && dashboard && (
         <>
           <div className="admin-counters">

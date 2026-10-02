@@ -13,6 +13,7 @@ os.environ["EXCHANGE_SOURCES_JSON"] = "[]"
 os.environ["BSE_IPO_ISSUES_JSON"] = "[]"
 os.environ["MARKET_SCHEDULER_ENABLED"] = "false"
 os.environ["CRON_SECRET"] = ""
+os.environ["CONFIG_ENCRYPTION_KEY"] = "test-only-market-config-key-32-characters"
 os.environ["TRADING_CALENDAR_YEAR"] = "0"
 
 import pytest

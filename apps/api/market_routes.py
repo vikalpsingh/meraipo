@@ -1,3 +1,4 @@
+import json
 import secrets
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field
 from sqlalchemy import func, select, update
 
+from apps.api import schemas
 from apps.api.repository import record
 from apps.api.schemas import Input
 from apps.api.security import admin
@@ -17,6 +19,12 @@ from packages.providers.bse_ipo import configuration as bse_configuration
 from packages.providers.exchanges import discovery_sources
 from packages.providers.market import configuration
 from packages.shared.config import settings
+from packages.shared.market_config import (
+    CONFIG_ID,
+    EDITABLE_FIELDS,
+    encrypt_secret,
+    load_market_settings,
+)
 from packages.shared.market_freshness import freshness, next_scheduled
 
 router = APIRouter()
@@ -55,7 +63,8 @@ class PauseRequest(Input):
 async def dispatch(db, job, trigger, data):
     if job not in ALL_JOBS:
         raise HTTPException(404, "Unknown market job")
-    if trigger == "scheduled" and not settings().market_scheduler_enabled:
+    runtime = await load_market_settings(db)
+    if trigger == "scheduled" and not runtime.market_scheduler_enabled:
         raise HTTPException(503, "Enable MARKET_SCHEDULER_ENABLED after completing setup")
     params = {}
     if job in ("sync-prices", "collect-prices") and data.to_date:
@@ -102,13 +111,102 @@ async def cron(job: str, request: Request, db=Depends(get_session)):
         raise HTTPException(401, "Invalid cron authentication")
     if job == "backfill":
         raise HTTPException(404, "Manual job only")
-    if settings().market_scheduler_driver != "vercel":
+    runtime = await load_market_settings(db)
+    if runtime.market_scheduler_driver != "vercel":
         raise HTTPException(409, "Celery owns scheduling; Vercel scheduling is disabled")
     return await dispatch(db, job, "scheduled", RunRequest())
 
 
+def configuration_response(config, row):
+    try:
+        feeds = json.loads(config.market_feeds_json or "{}")
+        for group in feeds.values():
+            for provider in group.values():
+                if provider.get("token"):
+                    provider["token"] = "********"
+        safe_feeds = json.dumps(feeds, indent=2)
+    except (TypeError, ValueError):
+        safe_feeds = config.market_feeds_json
+    return {
+        **{key: getattr(config, key) for key in EDITABLE_FIELDS},
+        "market_feeds_json": safe_feeds,
+        "ipoalerts_api_key_configured": bool(config.ipoalerts_api_key.get_secret_value()),
+        "source": "admin" if row else "environment",
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+    }
+
+
+@router.get("/admin/market/config")
+async def get_market_configuration(auth=Depends(admin), db=Depends(get_session)):
+    row = await db.get(m.MarketConfiguration, CONFIG_ID)
+    try:
+        config = await load_market_settings(db)
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return configuration_response(config, row)
+
+
+@router.put("/admin/market/config")
+async def save_market_configuration(
+    data: schemas.MarketConfigurationInput,
+    auth=Depends(admin),
+    db=Depends(get_session),
+):
+    current = await load_market_settings(db)
+    values = data.model_dump(
+        exclude={"ipoalerts_api_key", "clear_ipoalerts_api_key", "market_feeds_json"}
+    )
+    submitted_feeds = json.loads(data.market_feeds_json)
+    current_feeds = json.loads(current.market_feeds_json or "{}")
+    for kind, group in submitted_feeds.items():
+        for name, provider in group.items():
+            if provider.get("token") == "********":
+                provider["token"] = current_feeds.get(kind, {}).get(name, {}).get("token", "")
+    market_feeds_json = json.dumps(submitted_feeds, separators=(",", ":"))
+    try:
+        configuration(market_feeds_json)
+        discovery_sources(values["exchange_sources_json"])
+        bse_configuration(values["bse_ipo_issues_json"])
+    except Exception as exc:
+        raise HTTPException(422, f"Provider configuration is invalid: {exc}") from exc
+    row = await db.get(m.MarketConfiguration, CONFIG_ID)
+    before = dict(row.values) if row else None
+    if not row:
+        row = m.MarketConfiguration(id=CONFIG_ID, values={})
+        db.add(row)
+    row.values = values
+    row.updated_by = auth[0].id
+    try:
+        row.market_feeds_json_encrypted = encrypt_secret(market_feeds_json)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if data.clear_ipoalerts_api_key:
+        row.ipoalerts_api_key_encrypted = None
+    elif data.ipoalerts_api_key:
+        try:
+            row.ipoalerts_api_key_encrypted = encrypt_secret(data.ipoalerts_api_key)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    db.add(
+        m.Audit(
+            admin_id=auth[0].id,
+            action="market.config.update",
+            entity_id=CONFIG_ID,
+            changes={
+                "before": before,
+                "after": values,
+                "api_key_changed": bool(data.ipoalerts_api_key or data.clear_ipoalerts_api_key),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(row)
+    return configuration_response(await load_market_settings(db), row)
+
+
 @router.get("/admin/market")
 async def overview(auth=Depends(admin), db=Depends(get_session)):
+    config = await load_market_settings(db)
     # Recover visibility after a worker crash without pretending it completed.
     await db.execute(
         update(m.ImportRun)
@@ -134,9 +232,9 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
     ).all()
     controls = {c.name: c.paused for c in (await db.scalars(select(m.SchedulerControl))).all()}
     try:
-        feeds = configuration(settings().market_feeds_json)
-        native = discovery_sources(settings().exchange_sources_json)
-        bse_issues = bse_configuration(settings().bse_ipo_issues_json)
+        feeds = configuration(config.market_feeds_json)
+        native = discovery_sources(config.exchange_sources_json)
+        bse_issues = bse_configuration(config.bse_ipo_issues_json)
         config_error = None
     except Exception:
         feeds, native, config_error = (
@@ -156,7 +254,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         for kind, group in feeds.items()
         for name, c in group.items()
     ]
-    if settings().ipo_data_provider == "ipoalerts":
+    if config.ipo_data_provider == "ipoalerts":
         providers = [p for p in providers if p["kind"] != "ipos"]
         providers.append(
             {
@@ -164,7 +262,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
                 "name": "IPOALERTS",
                 "authority": "LICENSED",
                 "enabled": True,
-                "credential_set": bool(settings().ipoalerts_api_key.get_secret_value()),
+                "credential_set": bool(config.ipoalerts_api_key.get_secret_value()),
             }
         )
         providers.append(
@@ -173,10 +271,10 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
                 "name": "IPOALERTS",
                 "authority": "UNOFFICIAL",
                 "enabled": True,
-                "credential_set": bool(settings().ipoalerts_api_key.get_secret_value()),
+                "credential_set": bool(config.ipoalerts_api_key.get_secret_value()),
             }
         )
-    if settings().exchange_direct_enabled:
+    if config.exchange_direct_enabled:
         providers.extend(
             [
                 {
@@ -191,14 +289,12 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
                     ("ipos", "BSE"),
                     (
                         "subscriptions",
-                        "NSE_CONSOLIDATED"
-                        if settings().nse_subscription_categories_enabled
-                        else "NSE",
+                        "NSE_CONSOLIDATED" if config.nse_subscription_categories_enabled else "NSE",
                     ),
                     ("prices", "NSE"),
                     ("prices", "BSE"),
                 )
-                if kind != "ipos" or settings().ipo_data_provider == "exchange"
+                if kind != "ipos" or config.ipo_data_provider == "exchange"
             ]
         )
         providers.extend(
@@ -258,58 +354,58 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             failed=bool(
                 failure and (not latest or utc(failure.created_at) > utc(latest.created_at))
             ),
-            holidays=settings().trading_holidays.split(","),
+            holidays=config.trading_holidays.split(","),
         )
     return {
-        "ipo_data_provider": settings().ipo_data_provider,
-        "driver": settings().market_scheduler_driver,
+        "ipo_data_provider": config.ipo_data_provider,
+        "driver": config.market_scheduler_driver,
         "staging": {
             state: await db.scalar(
                 select(func.count()).select_from(m.MarketStage).where(m.MarketStage.status == state)
             )
             for state in ("PENDING", "PUBLISHED", "REJECTED", "FALLBACK_NOT_NEEDED")
         },
-        "enabled": settings().market_scheduler_enabled,
+        "enabled": config.market_scheduler_enabled,
         "setup": [
             {
                 "label": "IPO master data provider",
-                "ready": settings().ipo_data_provider != "ipoalerts"
-                or bool(settings().ipoalerts_api_key.get_secret_value()),
+                "ready": config.ipo_data_provider != "ipoalerts"
+                or bool(config.ipoalerts_api_key.get_secret_value()),
                 "setting": "IPO_DATA_PROVIDER="
-                + settings().ipo_data_provider
-                + "; IPOALERTS_API_KEY stays on backend. GMP uses includeGmp=true when available. NSE consolidated categories are collected independently when direct exchange access is enabled.",
+                + config.ipo_data_provider
+                + "; manage the encrypted IPOAlerts key in Config. GMP uses includeGmp=true when available. NSE consolidated categories are collected independently when direct exchange access is enabled.",
             },
             {
                 "label": "BSE category subscriptions",
                 "ready": bool(bse_issues),
-                "setting": "BSE_IPO_ISSUES_JSON · match each cumulative-demand issue ID to an exact company identifier",
+                "setting": "Config · BSE IPO issue mappings · match each cumulative-demand issue ID to an exact company identifier",
             },
             {
                 "label": "Quarterly source mapping",
                 "ready": any(s.kind == "results" and s.concepts for s in native)
                 or any(c.enabled for c in feeds.get("results", {}).values()),
-                "setting": "EXCHANGE_SOURCES_JSON · verified discovery fields and exact XBRL concept names",
+                "setting": "Config · Exchange sources JSON · verified discovery fields and exact XBRL concept names",
             },
             {
                 "label": "Cron authentication",
-                "ready": settings().market_scheduler_driver == "celery"
+                "ready": config.market_scheduler_driver == "celery"
                 or len(settings().cron_secret) >= 32,
                 "setting": "Docker: Celery scheduler; Vercel: shared CRON_SECRET",
             },
             {
                 "label": "Provider feeds",
-                "ready": settings().exchange_direct_enabled or any(p["enabled"] for p in providers),
-                "setting": "EXCHANGE_DIRECT_ENABLED=true; review EXCHANGE_SOURCES_JSON for financial filings",
+                "ready": config.exchange_direct_enabled or any(p["enabled"] for p in providers),
+                "setting": "Config · enable direct exchanges or define licensed feeds",
             },
             {
                 "label": "Trading calendar",
-                "ready": settings().trading_calendar_year == date.today().year,
-                "setting": "TRADING_CALENDAR_YEAR and TRADING_HOLIDAYS",
+                "ready": config.trading_calendar_year == date.today().year,
+                "setting": "Config · trading calendar year and holiday dates",
             },
             {
                 "label": "Scheduled execution",
-                "ready": settings().market_scheduler_enabled,
-                "setting": "MARKET_SCHEDULER_ENABLED=true after setup",
+                "ready": config.market_scheduler_enabled,
+                "setting": "Config · enable scheduled jobs after provider setup",
             },
         ],
         "configuration_error": config_error,
@@ -324,10 +420,10 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
                     next_scheduled(
                         name,
                         m.now().astimezone(ZoneInfo("Asia/Kolkata")),
-                        settings().trading_holidays.split(","),
+                        config.trading_holidays.split(","),
                     )
                     if name.startswith("sync-")
-                    and settings().market_scheduler_enabled
+                    and config.market_scheduler_enabled
                     and not controls.get(name, False)
                     else None
                 ),

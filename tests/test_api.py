@@ -5,7 +5,14 @@ from sqlalchemy import func, select
 
 from apps.api.ad_images import CachedLogo
 from apps.api.security import verify
-from packages.database.models import AdminSession, AdminUser, Audit, Quarterly
+from packages.database.models import (
+    AdminSession,
+    AdminUser,
+    Audit,
+    MarketConfiguration,
+    Quarterly,
+)
+from packages.shared.market_config import load_market_settings
 
 
 async def test_catalog_from_database_and_missing_values(client):
@@ -207,6 +214,76 @@ async def test_ad_logo_is_downloaded_once_and_served_locally(admin_client, monke
     )
     assert updated.status_code == 200
     assert calls == [data["image_url"]]
+
+
+async def test_market_configuration_is_encrypted_and_loaded_for_new_jobs(admin_client, db):
+    current = await admin_client.get("/api/v1/admin/market/config")
+    assert current.status_code == 200
+    assert current.json()["source"] == "environment"
+    assert "ipoalerts_api_key" not in current.json()
+    payload = {
+        "provider_mode": "market-feeds",
+        "market_scheduler_enabled": True,
+        "market_scheduler_driver": "celery",
+        "exchange_direct_enabled": True,
+        "nse_subscription_categories_enabled": True,
+        "ipo_data_provider": "ipoalerts",
+        "ipoalerts_api_key": "provider-secret-value",
+        "clear_ipoalerts_api_key": False,
+        "ipoalerts_page_size": 50,
+        "market_feeds_json": '{"gmp":{"licensed":{"url":"https://example.com/feed","token":"feed-secret","enabled":true,"authority":"UNOFFICIAL"}}}',
+        "exchange_sources_json": "[]",
+        "bse_ipo_issues_json": "[]",
+        "trading_holidays": "2026-10-02,2026-11-08",
+        "trading_calendar_year": 2026,
+    }
+    saved = await admin_client.put("/api/v1/admin/market/config", json=payload)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["source"] == "admin"
+    assert saved.json()["ipoalerts_api_key_configured"] is True
+    assert "ipoalerts_api_key" not in saved.json()
+    row = await db.get(MarketConfiguration, "market")
+    assert "provider-secret-value" not in row.ipoalerts_api_key_encrypted
+    effective = await load_market_settings(db)
+    assert effective.provider_mode == "market-feeds"
+    assert effective.market_scheduler_enabled is True
+    assert effective.ipoalerts_api_key.get_secret_value() == "provider-secret-value"
+    assert "feed-secret" not in row.market_feeds_json_encrypted
+    assert "********" in saved.json()["market_feeds_json"]
+    assert "feed-secret" in effective.market_feeds_json
+    assert (await admin_client.get("/api/v1/admin/dashboard")).json()["provider_mode"] == (
+        "market-feeds"
+    )
+
+    payload["ipoalerts_api_key"] = None
+    payload["ipoalerts_page_size"] = 25
+    payload["market_feeds_json"] = saved.json()["market_feeds_json"]
+    updated = await admin_client.put("/api/v1/admin/market/config", json=payload)
+    assert updated.status_code == 200
+    assert (await load_market_settings(db)).ipoalerts_api_key.get_secret_value() == (
+        "provider-secret-value"
+    )
+    assert "feed-secret" in (await load_market_settings(db)).market_feeds_json
+
+
+async def test_market_configuration_rejects_invalid_provider_json(admin_client):
+    current = (await admin_client.get("/api/v1/admin/market/config")).json()
+    payload = {
+        key: value
+        for key, value in current.items()
+        if key
+        not in {
+            "ipoalerts_api_key_configured",
+            "source",
+            "updated_at",
+        }
+    }
+    payload.update(
+        ipoalerts_api_key=None,
+        clear_ipoalerts_api_key=False,
+        market_feeds_json="not-json",
+    )
+    assert (await admin_client.put("/api/v1/admin/market/config", json=payload)).status_code == 422
 
 
 async def test_logout_revokes_session(admin_client, db):

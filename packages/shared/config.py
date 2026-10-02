@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from typing import Literal
 
@@ -27,6 +29,7 @@ class Settings(BaseSettings):
     gmp_refresh_minutes: int = 60
     eod_hour_ist: int = 18
     cron_secret: str = ""
+    config_encryption_key: SecretStr = SecretStr("")
     market_feeds_json: str = "{}"
     trading_holidays: str = ""
     trading_calendar_year: int = 0
@@ -55,5 +58,21 @@ class Settings(BaseSettings):
 
 
 @lru_cache
-def settings() -> Settings:
+def base_settings() -> Settings:
     return Settings()
+
+
+_runtime_settings: ContextVar[Settings | None] = ContextVar("runtime_settings", default=None)
+
+
+def settings() -> Settings:
+    return _runtime_settings.get() or base_settings()
+
+
+@contextmanager
+def use_settings(value: Settings):
+    token = _runtime_settings.set(value)
+    try:
+        yield value
+    finally:
+        _runtime_settings.reset(token)

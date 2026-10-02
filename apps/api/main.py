@@ -26,6 +26,7 @@ from packages.database import models as m
 from packages.database.session import engine, get_session
 from packages.shared.calculations import financial_quarter, financial_year
 from packages.shared.config import settings
+from packages.shared.market_config import load_market_settings
 
 logger = logging.getLogger("meraipo")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -515,6 +516,7 @@ async def save_applicant_guide(
 
 @app.get("/api/v1/admin/dashboard")
 async def dashboard(auth=Depends(security.admin), db: AsyncSession = Depends(get_session)):
+    market_config = await load_market_settings(db)
     items = await repo.catalog(db)
     runs = [
         repo.record(r)
@@ -540,7 +542,7 @@ async def dashboard(auth=Depends(security.admin), db: AsyncSession = Depends(get
         ),
         "conflicts": sum(c["quality"] == "CONFLICT" for c in items),
         "failed_jobs": sum(r["status"] == "FAILED" for r in runs),
-        "provider_mode": settings().provider_mode,
+        "provider_mode": market_config.provider_mode,
         "imports": runs,
         "companies": items,
     }

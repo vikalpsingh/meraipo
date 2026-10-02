@@ -11,6 +11,7 @@ from packages.database.models import ImportRun
 from packages.database.session import Session, engine
 from packages.providers.adapters import provider
 from packages.shared.config import settings
+from packages.shared.market_config import load_market_settings, market_settings_context
 
 config = settings()
 celery = Celery("meraipo", broker=config.redis_url, backend=config.redis_url)
@@ -24,18 +25,14 @@ celery.conf.update(
     result_expires=86400,
     broker_connection_timeout=3,
     task_publish_retry=False,
-    beat_schedule=(
-        {
-            name: {"task": "meraipo.scheduled_market", "schedule": schedule, "args": [name]}
-            for name, schedule in {
-                "sync-ipos": crontab(hour=23, minute=0),
-                "sync-prices": crontab(hour=23, minute=10),
-                "sync-results": crontab(hour=21, minute=0, day_of_week="5"),
-            }.items()
-        }
-        if config.market_scheduler_enabled and config.market_scheduler_driver == "celery"
-        else {}
-    ),
+    beat_schedule={
+        name: {"task": "meraipo.scheduled_market", "schedule": schedule, "args": [name]}
+        for name, schedule in {
+            "sync-ipos": crontab(hour=23, minute=0),
+            "sync-prices": crontab(hour=23, minute=10),
+            "sync-results": crontab(hour=21, minute=0, day_of_week="5"),
+        }.items()
+    },
 )
 
 
@@ -49,7 +46,8 @@ def market_job(run_id):
                 run = await db.get(ImportRun, run_id)
                 if not run:
                     return {"status": "NOT_FOUND"}
-                result = await run_job(db, run)
+                async with market_settings_context(db):
+                    result = await run_job(db, run)
                 return {"status": result.status}
         finally:
             await engine.dispose()
@@ -62,10 +60,11 @@ def market_job(run_id):
 
 async def execute(kind, key):
     try:
-        batch = await provider(config.provider_mode).fetch(kind)
         async with Session() as db:
-            async with db.begin():
-                return await ingest(db, batch, key)
+            async with market_settings_context(db) as runtime:
+                batch = await provider(runtime.provider_mode).fetch(kind)
+                async with db.begin():
+                    return await ingest(db, batch, key)
     finally:
         await engine.dispose()
 
@@ -73,9 +72,10 @@ async def execute(kind, key):
 async def failed(key, kind):
     try:
         async with Session() as db:
+            runtime = await load_market_settings(db)
             run = await db.scalar(select(ImportRun).where(ImportRun.key == key))
             if not run:
-                run = ImportRun(key=key, provider=config.provider_mode, status="FAILED")
+                run = ImportRun(key=key, provider=runtime.provider_mode, status="FAILED")
                 db.add(run)
             run.status = "FAILED"
             run.error = f"{kind} refresh exhausted retries; inspect worker logs using import key"
@@ -113,24 +113,25 @@ def scheduled_market(job):
     from apps.worker.exchange_pipeline import PIPELINE_JOBS
     from apps.worker.market import create_run
 
-    if (
-        not config.market_scheduler_enabled
-        or config.market_scheduler_driver != "celery"
-        or job not in PIPELINE_JOBS
-    ):
-        return {"status": "DISABLED"}
-
     async def dispatch():
         try:
             async with Session() as db:
-                run = await create_run(db, job, "scheduled")
-                try:
-                    market_job.delay(run.id)
-                except Exception:
-                    run.status, run.error = "FAILED", "QUEUE_UNAVAILABLE"
-                    await db.commit()
-                    raise
-                return {"id": run.id}
+                runtime = await load_market_settings(db)
+                if (
+                    not runtime.market_scheduler_enabled
+                    or runtime.market_scheduler_driver != "celery"
+                    or job not in PIPELINE_JOBS
+                ):
+                    return {"status": "DISABLED"}
+                async with market_settings_context(db):
+                    run = await create_run(db, job, "scheduled")
+                    try:
+                        market_job.delay(run.id)
+                    except Exception:
+                        run.status, run.error = "FAILED", "QUEUE_UNAVAILABLE"
+                        await db.commit()
+                        raise
+                    return {"id": run.id}
         finally:
             await engine.dispose()
 
