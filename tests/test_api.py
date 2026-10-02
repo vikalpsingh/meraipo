@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from sqlalchemy import func, select
 
+from apps.api.ad_images import CachedLogo
 from apps.api.security import verify
 from packages.database.models import AdminSession, AdminUser, Audit, Quarterly
 
@@ -164,6 +165,48 @@ async def test_ad_disabled_by_default_and_https_validation(admin_client):
             "/api/v1/admin/advertisements", json={**data, "destination_url": "javascript:alert(1)"}
         )
     ).status_code == 422
+
+
+async def test_ad_logo_is_downloaded_once_and_served_locally(admin_client, monkeypatch):
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
+    calls = []
+
+    async def fake_fetch(url):
+        calls.append(url)
+        return CachedLogo(svg, "image/svg+xml", "a" * 64)
+
+    monkeypatch.setattr("apps.api.main.fetch_logo", fake_fetch)
+    data = {
+        "text": "Trade with Kite",
+        "image_url": "https://commons.wikimedia.org/wiki/File:Zerodha_Kite_logo.svg",
+        "destination_url": "https://kite.zerodha.com",
+        "enabled": True,
+    }
+    created = await admin_client.post("/api/v1/admin/advertisements", json=data)
+    assert created.status_code == 201, created.text
+    assert created.json()["image_cached"] is True
+    assert created.json()["image_bytes"] == len(svg)
+    assert created.json()["image_url"] == data["image_url"]
+
+    public = (await admin_client.get("/api/v1/site/advertisements")).json()["items"][0]
+    assert public["image_url"].startswith(
+        f"/api/v1/site/advertisements/{created.json()['id']}/image?v="
+    )
+    image = await admin_client.get(public["image_url"])
+    assert image.content == svg
+    assert image.headers["content-type"] == "image/svg+xml"
+    assert image.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert (
+        await admin_client.get(
+            public["image_url"], headers={"if-none-match": image.headers["etag"]}
+        )
+    ).status_code == 304
+
+    updated = await admin_client.put(
+        "/api/v1/admin/advertisements/" + created.json()["id"], json=data
+    )
+    assert updated.status_code == 200
+    assert calls == [data["image_url"]]
 
 
 async def test_logout_revokes_session(admin_client, db):

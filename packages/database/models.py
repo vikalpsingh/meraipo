@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -436,6 +437,10 @@ class Advertisement(Entity, Base):
     __tablename__ = "advertisements"
     text: Mapped[str] = mapped_column(String(240))
     image_url: Mapped[str | None] = mapped_column(Text)
+    image_mime: Mapped[str | None] = mapped_column(String(100))
+    image_data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    image_sha256: Mapped[str | None] = mapped_column(String(64))
+    image_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     destination_url: Mapped[str] = mapped_column(Text)
     placement: Mapped[str] = mapped_column(String(30), default="home")
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)

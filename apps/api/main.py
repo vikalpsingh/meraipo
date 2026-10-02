@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.api import cache, schemas, security, services
 from apps.api import repository as repo
+from apps.api.ad_images import LogoError, fetch_logo
 from apps.api.feature_routes import require_feature
 from apps.api.feature_routes import router as feature_router
 from apps.api.feedback_routes import router as feedback_router
@@ -107,17 +108,18 @@ async def observe(request, call_next):
     )
     if settings().environment == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Cache-Control"] = (
-        "no-store"
-        if "/admin" in request.url.path or request.url.path.startswith("/api/v1/feedback")
-        else (
-            "public, max-age=30"
-            if request.method == "GET"
-            and response.status_code == 200
-            and request.url.path.startswith("/api/v1")
-            else "no-store"
+    if "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = (
+            "no-store"
+            if "/admin" in request.url.path or request.url.path.startswith("/api/v1/feedback")
+            else (
+                "public, max-age=30"
+                if request.method == "GET"
+                and response.status_code == 200
+                and request.url.path.startswith("/api/v1")
+                else "no-store"
+            )
         )
-    )
     logger.info(
         json.dumps(
             {
@@ -355,7 +357,7 @@ async def advertisements(
 ):
     return {
         "items": [
-            repo.record(ad)
+            advertisement_record(ad, public=True)
             for ad in (
                 await db.scalars(
                     select(m.Advertisement).where(
@@ -365,6 +367,40 @@ async def advertisements(
             ).all()
         ]
     }
+
+
+def advertisement_record(ad, *, public=False):
+    result = {
+        key: getattr(ad, key)
+        for key in ("id", "text", "image_url", "destination_url", "placement", "enabled")
+    }
+    if public:
+        result["image_url"] = (
+            f"/api/v1/site/advertisements/{ad.id}/image?v={ad.image_sha256[:12]}"
+            if ad.image_data and ad.image_sha256
+            else None
+        )
+    else:
+        result.update(
+            image_cached=bool(ad.image_data),
+            image_bytes=len(ad.image_data) if ad.image_data else 0,
+            image_fetched_at=(ad.image_fetched_at.isoformat() if ad.image_fetched_at else None),
+        )
+    return result
+
+
+@app.get("/api/v1/site/advertisements/{item_id}/image")
+async def advertisement_image(
+    item_id: str, request: Request, db: AsyncSession = Depends(get_session)
+):
+    ad = await db.get(m.Advertisement, item_id)
+    if not ad or not ad.enabled or not ad.image_data or not ad.image_mime or not ad.image_sha256:
+        raise HTTPException(404, "Advertisement image not found")
+    etag = f'"{ad.image_sha256}"'
+    headers = {"Cache-Control": "public, max-age=31536000, immutable", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=ad.image_data, media_type=ad.image_mime, headers=headers)
 
 
 @app.post("/api/v1/admin/login")
@@ -493,9 +529,7 @@ async def dashboard(auth=Depends(security.admin), db: AsyncSession = Depends(get
         "missing_results": sum(c["status"] == "LISTED" and not c["latest"] for c in items),
         "missing_symbols": sum(not c["ticker"] for c in items),
         "missing_ipo_data": sum(c["price_high"] is None for c in items),
-        "missing_gmp": sum(
-            c["status"] in {"OPEN", "UPCOMING"} and c["gmp"] is None for c in items
-        ),
+        "missing_gmp": sum(c["status"] in {"OPEN", "UPCOMING"} and c["gmp"] is None for c in items),
         "stale_gmp": sum(c["gmp_quality"] == "STALE" for c in items),
         "stale_prices": sum(
             c["status"] == "LISTED"
@@ -604,7 +638,11 @@ async def edit_message(
 
 @app.get("/api/v1/admin/advertisements")
 async def admin_ads(auth=Depends(security.admin), db: AsyncSession = Depends(get_session)):
-    return {"items": [repo.record(r) for r in (await db.scalars(select(m.Advertisement))).all()]}
+    return {
+        "items": [
+            advertisement_record(r) for r in (await db.scalars(select(m.Advertisement))).all()
+        ]
+    }
 
 
 @app.post("/api/v1/admin/advertisements", status_code=201)
@@ -612,11 +650,20 @@ async def create_ad(
     data: schemas.AdInput, auth=Depends(security.admin), db: AsyncSession = Depends(get_session)
 ):
     result = m.Advertisement(**data.model_dump())
+    if data.image_url:
+        try:
+            logo = await fetch_logo(data.image_url)
+        except LogoError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        result.image_data = logo.content
+        result.image_mime = logo.mime
+        result.image_sha256 = logo.sha256
+        result.image_fetched_at = m.now()
     db.add(result)
     await db.flush()
     services.audit(db, auth[0].id, "ad.create", result)
     await commit(db)
-    return repo.record(result)
+    return advertisement_record(result)
 
 
 @app.put("/api/v1/admin/advertisements/{item_id}")
@@ -630,12 +677,28 @@ async def edit_ad(
     if not result:
         raise HTTPException(404, "Advertisement not found")
     before = repo.record(result)
+    logo = None
+    if data.image_url and (data.image_url != result.image_url or not result.image_data):
+        try:
+            logo = await fetch_logo(data.image_url)
+        except LogoError as exc:
+            raise HTTPException(422, str(exc)) from exc
     for key, value in data.model_dump().items():
         setattr(result, key, value)
+    if logo:
+        result.image_data = logo.content
+        result.image_mime = logo.mime
+        result.image_sha256 = logo.sha256
+        result.image_fetched_at = m.now()
+    elif not data.image_url:
+        result.image_data = None
+        result.image_mime = None
+        result.image_sha256 = None
+        result.image_fetched_at = None
     await db.flush()
     services.audit(db, auth[0].id, "ad.update", result, before)
     await commit(db)
-    return repo.record(result)
+    return advertisement_record(result)
 
 
 @app.get("/api/v1/admin/audit")

@@ -172,6 +172,9 @@ export type Advertisement = {
   destination_url: string;
   placement: string;
   enabled: boolean;
+  image_cached?: boolean;
+  image_bytes?: number;
+  image_fetched_at?: string | null;
 };
 export type TrackerResult = {
   items: Company[];

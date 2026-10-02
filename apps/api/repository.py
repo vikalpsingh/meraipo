@@ -136,6 +136,7 @@ def record(obj):
             )
         )
         for column in obj.__table__.columns
+        if column.name != "image_data"
         for value in [getattr(obj, column.name)]
     }
 

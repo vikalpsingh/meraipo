@@ -30,17 +30,24 @@ export function Ads({ items }: { items: Advertisement[] }) {
         <aside className="advertisement" key={ad.id}>
           <small>ADVERTISEMENT</small>
           <a href={ad.destination_url} rel="sponsored noopener noreferrer" target="_blank">
-            {ad.image_url && (
-              <Image
-                unoptimized
-                src={ad.image_url}
-                alt=""
-                loading="lazy"
-                width={600}
-                height={180}
-              />
-            )}
-            <span>{ad.text} ↗</span>
+            <span className="advertisement-creative">
+              {ad.image_url && (
+                <span className="advertisement-logo">
+                  <Image
+                    unoptimized
+                    src={ad.image_url}
+                    alt=""
+                    loading="lazy"
+                    width={112}
+                    height={72}
+                  />
+                </span>
+              )}
+              <span className="advertisement-copy">
+                <b>{ad.text}</b>
+                <span>Visit advertiser ↗</span>
+              </span>
+            </span>
           </a>
         </aside>
       ))}

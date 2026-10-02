@@ -47,3 +47,24 @@ it('labels configured advertisements', () => {
   expect(screen.getByText('ADVERTISEMENT')).toBeInTheDocument();
   expect(screen.getByRole('link')).toHaveAttribute('rel', 'sponsored noopener noreferrer');
 });
+it('renders a cached advertisement logo and call to action', () => {
+  render(
+    <Ads
+      items={[
+        {
+          id: 'kite',
+          text: 'Trade with Kite',
+          destination_url: 'https://kite.zerodha.com',
+          image_url: '/api/v1/site/advertisements/kite/image?v=abc',
+          placement: 'home',
+          enabled: true,
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('img')).toHaveAttribute(
+    'src',
+    '/api/v1/site/advertisements/kite/image?v=abc',
+  );
+  expect(screen.getByText('Visit advertiser ↗')).toBeInTheDocument();
+});

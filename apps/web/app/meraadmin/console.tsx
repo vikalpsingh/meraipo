@@ -693,7 +693,7 @@ export default function Console() {
               fields={[
                 ['text', 'Ad text', 'text', true],
                 ['destination_url', 'Destination URL', 'url', true],
-                ['image_url', 'Image URL (optional)', 'url'],
+                ['image_url', 'Logo URL (downloaded and stored)', 'url'],
               ]}
               values={editAd ? { ...editAd } : {}}
             />
@@ -716,7 +716,12 @@ export default function Console() {
             {ads.map((a) => (
               <article key={a.id}>
                 <p>
-                  {a.text} · {a.enabled ? 'Enabled' : 'Disabled'}
+                  {a.text} · {a.enabled ? 'Enabled' : 'Disabled'} ·{' '}
+                  {a.image_url
+                    ? a.image_cached
+                      ? 'Logo stored locally'
+                      : 'Logo needs saving'
+                    : 'No logo'}
                 </p>
                 <button onClick={() => setEditAd(a)}>Edit {a.text}</button>
               </article>
