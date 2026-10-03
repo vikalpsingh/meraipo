@@ -1987,3 +1987,52 @@ body:has(.company-preview[open]) {
     height: 58px;
   }
 }
+
+.ipo-interest-table .security-type {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ipo-interest-table .security-type--sme {
+  background: #fff1d6;
+  color: #784b0b;
+}
+
+.ipo-interest-table .security-type--eq {
+  background: #e6efff;
+  color: #234d86;
+}
+
+.ipo-interest-table .security-type--unknown {
+  background: #f0f2f4;
+  color: #515b65;
+}
+
+/* Carry the GMP bands across the row; green shades keep black text readable. */
+.ipo-interest-table .ipo-gmp--neutral {
+  --gmp-row-background: #ffffff;
+}
+.ipo-interest-table .ipo-gmp--light-green {
+  --gmp-row-background: #dcfce7;
+}
+.ipo-interest-table .ipo-gmp--dark-green {
+  --gmp-row-background: #86efac;
+}
+.ipo-interest-table .ipo-gmp--gold {
+  --gmp-row-background: #f5cf62;
+}
+.ipo-interest-table .ipo-row > td {
+  background: var(--gmp-row-background);
+  color: #000000;
+  font-weight: 700;
+}
+.ipo-interest-table .ipo-row > td > .table-subline,
+.ipo-interest-table .ipo-row > td > .security-type,
+.ipo-interest-table .ipo-row > td > .ipo-company-line > .ipo-status,
+.ipo-interest-table .ipo-row > td > .ipo-company-line > .company-preview-trigger {
+  color: #000000;
+  font-weight: 700;
+}

@@ -5,7 +5,7 @@ import { date, money, number, timestamp } from '@/lib/format';
 import { indiaDay } from '@/lib/applicant';
 import { ipoStatus } from '@/lib/ipo-status';
 
-function GMPPercentage({ company: c }: { company: Company }) {
+function gmpPresentation(c: Company) {
   const value =
     c.gmp == null || c.price_high == null || c.price_high <= 0
       ? null
@@ -18,6 +18,11 @@ function GMPPercentage({ company: c }: { company: Company }) {
         : value != null && value > 20
           ? 'light-green'
           : 'neutral';
+  return { value, tone };
+}
+
+function GMPPercentage({ company: c }: { company: Company }) {
+  const { value, tone } = gmpPresentation(c);
   return (
     <td
       className={`gmp-percent gmp-percent--${tone}`}
@@ -48,17 +53,20 @@ export function IPOInterestTable({
             <th>Company / bidding dates</th>
             <th>Security type</th>
             <th>Price band</th>
-            <th>Retail %</th>
-            <th>QIB %</th>
-            <th>NII %</th>
-            <th>Total %</th>
+            <th>Retail ×</th>
+            <th>QIB ×</th>
+            <th>NII ×</th>
+            <th>Total ×</th>
             <th>GMP · unofficial</th>
             <th title="GMP ÷ upper price band × 100">GMP %</th>
           </tr>
         </thead>
         <tbody>
           {companies.map((c) => (
-            <tr key={c.id} className={`ipo-row ipo-tone-${ipoStatus(c, today).tone}`}>
+            <tr
+              key={c.id}
+              className={`ipo-row ipo-tone-${ipoStatus(c, today).tone} ipo-gmp--${gmpPresentation(c).tone}`}
+            >
               <td>
                 <div className="ipo-company-line">
                   <CompanyPreview company={c} />
@@ -71,7 +79,11 @@ export function IPOInterestTable({
                 </small>
               </td>
               <td>
-                {c.board === 'SME' ? 'SME' : c.board === 'Mainboard' ? 'EQ' : 'Not announced'}
+                <span
+                  className={`security-type security-type--${c.board === 'SME' ? 'sme' : c.board === 'Mainboard' ? 'eq' : 'unknown'}`}
+                >
+                  {c.board === 'SME' ? 'SME' : c.board === 'Mainboard' ? 'EQ' : 'Not announced'}
+                </span>
               </td>
               <td>
                 {c.price_low == null || c.price_high == null
@@ -86,7 +98,7 @@ export function IPOInterestTable({
                     {value == null ? (
                       <span title={gap || 'Not reported by source'}>—{gap && '**'}</span>
                     ) : (
-                      `${number(Number(value) * 100)}%`
+                      `${number(Number(value))}×`
                     )}
                   </td>
                 );
@@ -105,15 +117,15 @@ export function IPOInterestTable({
         </tbody>
       </table>
       <p className="small">
-        Subscription is bids ÷ shares offered. 100% = 1×. Select a company for category details and
-        daily history. — means not reported.
+        Subscription is bids ÷ shares offered, shown in times (×). 1× means fully subscribed. Select
+        a company for category details and daily history. — means not reported.
       </p>
       {companies.some((c) =>
         Object.values(c.subscription?.categories || {}).some((category) => category.gap_note),
       ) && (
         <p className="small">
-          ** Verified category allocations are missing or reported as zero. Percentages remain
-          blank; total IPO shares are not substituted. Select the company for source-gap details.
+          ** Verified category allocations are missing or reported as zero. Multiples remain blank;
+          total IPO shares are not substituted. Select the company for source-gap details.
         </p>
       )}
     </div>

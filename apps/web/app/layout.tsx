@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     description: 'IPO research, one quarter at a time.',
   },
   twitter: { card: 'summary' },
-  icons: { icon: '/favicon.svg' },
+  icons: { icon: { url: '/favicon.svg?v=market-logo-2', type: 'image/svg+xml' } },
 };
 export default async function Layout({ children }: { children: React.ReactNode }) {
   const flags = await features();

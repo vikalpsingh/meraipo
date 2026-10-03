@@ -31,8 +31,8 @@ it('marks unverified allocations with ** and explains the denominator gap', () =
     <IPOInterestTable companies={[company as Company]} today="2026-09-26" />,
   );
   expect(screen.getByTitle('Verified category allocation missing.')).toHaveTextContent('—**');
-  expect(screen.getByRole('cell', { name: '0%' })).toBeInTheDocument();
-  expect(screen.getByRole('cell', { name: '250%' })).toBeInTheDocument();
+  expect(screen.getByRole('cell', { name: '0×' })).toBeInTheDocument();
+  expect(screen.getByRole('cell', { name: '2.5×' })).toBeInTheDocument();
   expect(container.textContent).toContain('total IPO shares are not substituted');
   expect(container.textContent).toContain('SME individual-investor bids');
 });

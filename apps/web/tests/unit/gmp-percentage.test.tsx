@@ -29,6 +29,7 @@ it.each([
   render(<IPOInterestTable companies={[company as Company]} today="2026-09-27" />);
   const cell = within(screen.getAllByRole('row')[1]).getAllByRole('cell').at(-1);
   expect(cell).toHaveClass(`gmp-percent--${tone}`);
+  expect(screen.getAllByRole('row')[1]).toHaveClass(`ipo-gmp--${tone}`);
 });
 
 it.each([
