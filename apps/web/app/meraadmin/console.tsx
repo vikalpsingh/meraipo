@@ -7,6 +7,7 @@ import { MarketConsole } from '@/components/market-console';
 import { MarketConfig } from '@/components/market-config';
 import { JobErrorLog } from '@/components/job-error-log';
 import { FeedbackInbox } from '@/components/feedback-inbox';
+import { ClickAnalytics } from '@/components/click-analytics';
 import { FeatureControls } from '@/components/feature-controls';
 type Session = { email: string; csrf_token: string };
 type Dashboard = {
@@ -255,6 +256,7 @@ export default function Console() {
           'Feature releases',
           'Data & scheduler',
           'Config',
+          'Analytics',
           'Customer feedback',
           'IPOs',
           'Applicant guides',
@@ -285,6 +287,7 @@ export default function Console() {
       {tab === 'Data & scheduler' && session && (
         <MarketConsole csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
+      {tab === 'Analytics' && <ClickAnalytics />}
       {tab === 'Config' && session && <MarketConfig csrf={session.csrf_token} />}
       {tab === 'Dashboard' && dashboard && (
         <>

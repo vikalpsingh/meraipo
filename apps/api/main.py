@@ -18,6 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from apps.api import cache, schemas, security, services
 from apps.api import repository as repo
 from apps.api.ad_images import LogoError, fetch_logo
+from apps.api.analytics_routes import router as analytics_router
 from apps.api.feature_routes import require_feature
 from apps.api.feature_routes import router as feature_router
 from apps.api.feedback_routes import router as feedback_router
@@ -49,6 +50,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(feature_router)
 app.include_router(market_router, prefix="/api/v1")
 app.include_router(feedback_router, prefix="/api/v1")

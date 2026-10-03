@@ -91,12 +91,16 @@ const pages: Record<string, { title: string; intro: string; sections: [string, s
         'Administrator email, Argon2id password hashes, hashed session tokens, audit records and security-related request logs support site maintenance. Admin session cookies are necessary for authentication and CSRF protection.',
       ],
       [
+        'Anonymous click counts',
+        'We count link and button clicks by broad page section and day, retaining totals for 400 days. This analytics feature stores no visitor identifiers, click text, full URLs or analytics cookies. It excludes administrator pages and respects the browser Do Not Track setting.',
+      ],
+      [
         'What we do not request',
         'Do not send PAN, demat, UPI, bank or broker credentials. Public research does not require personal investment information.',
       ],
       [
         'Deployment configuration',
-        'The operator must publish its contact details, retention periods and hosting/subprocessor information before a public production launch. No advertising tracker or analytics integration is enabled in this implementation.',
+        'The operator must publish its contact details, retention periods and hosting/subprocessor information before a public production launch. No third-party analytics or advertising tracker is used.',
       ],
     ],
   },

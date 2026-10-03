@@ -505,3 +505,10 @@ Index(
     Provenance.field_name,
 )
 Index("ix_subscription_ipo_observed", Subscription.ipo_id, Subscription.observed_at)
+
+
+class ClickDaily(Base):
+    __tablename__ = "analytics_click_daily"
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    section: Mapped[str] = mapped_column(String(20), primary_key=True)
+    clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

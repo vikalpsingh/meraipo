@@ -3,6 +3,7 @@ import Link from 'next/link';
 import './globals.css';
 import { SiteNavigation } from '@/components/site-navigation';
 import { features } from '@/lib/features';
+import { ClickTracker } from '@/components/click-tracker';
 import { Brand } from '@/components/brand';
 const origin = process.env.SITE_URL || 'http://localhost:3000';
 export const metadata: Metadata = {
@@ -23,6 +24,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   return (
     <html lang="en">
       <body>
+        <ClickTracker />
         <a className="skip-link" href="#main">
           Skip to content
         </a>
