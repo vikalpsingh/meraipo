@@ -109,9 +109,21 @@ services:
       API_INTERNAL_URL: http://api:8000
       CRON_SECRET: ${CRON_SECRET:-}
       SITE_URL: ${SITE_URL:-http://localhost:3000}
-    ports: ["127.0.0.1:3000:3000"]
+    expose: ["3000"]
     depends_on:
       api: {condition: service_healthy}
+  gateway:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.gateway
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      web: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/gateway-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 volumes:
   postgres_data:
   redis_data:
