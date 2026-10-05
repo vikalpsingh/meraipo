@@ -453,6 +453,7 @@ class SchedulerControl(Base):
     __tablename__ = "scheduler_controls"
     name: Mapped[str] = mapped_column(String(40), primary_key=True)
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    schedule_times: Mapped[list | None] = mapped_column(JSON)
 
 
 class MarketConfiguration(Base):

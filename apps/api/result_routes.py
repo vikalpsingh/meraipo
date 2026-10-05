@@ -57,6 +57,14 @@ async def configure(
         state = m.ResultSource(exchange=exchange)
         db.add(state)
     state.enabled, state.schedule = data.enabled, data.schedule
+    db.add(
+        m.Audit(
+            admin_id=auth[0].id,
+            action="market.result_source",
+            entity_id=exchange,
+            changes=data.model_dump(),
+        )
+    )
     await db.commit()
     return {"saved": True}
 

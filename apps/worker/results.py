@@ -224,6 +224,7 @@ async def sync(db, run, counts, session_factory=feed.ExchangeSession):
     today = india_today()
     end = date.fromisoformat(parameters.get("to", today.isoformat()))
     start = date.fromisoformat(parameters.get("from", (end - timedelta(days=13)).isoformat()))
+    notes = []
     for exchange in parameters.get("exchanges", ["BSE", "NSE"]):
         state = await db.get(m.ResultSource, exchange)
         if not state:
@@ -233,6 +234,7 @@ async def sync(db, run, counts, session_factory=feed.ExchangeSession):
             db.add(state)
             await db.flush()
         if not state.enabled:
+            notes.append(f"{exchange}: SOURCE_DISABLED")
             continue
         if state.retry_at and utc(state.retry_at) > m.now():
             counts["failed"] += 1
@@ -255,6 +257,7 @@ async def sync(db, run, counts, session_factory=feed.ExchangeSession):
             mappings = [r for r in mappings if r.company_id == parameters["company_id"]]
         tracked = {r.ticker for r in mappings}
         if not tracked:
+            notes.append(f"{exchange}: NO_TRACKED_IDENTIFIERS")
             continue
         if run.trigger == "reconciliation" and state.status == "SOURCE_ACCESS_BLOCKED":
             # A weekly batch must not repeat a known denial for every company.
@@ -355,11 +358,30 @@ async def sync(db, run, counts, session_factory=feed.ExchangeSession):
                 for filing in pending:
                     if filing.retry_at and utc(filing.retry_at) > m.now():
                         continue
+                    failures_before = counts["failed"]
                     await process(db, filing, session, counts)
+                    if filing.status in ("DOWNLOAD_RETRY", "PARSING_REVIEW_REQUIRED"):
+                        counts["review_required"] = counts.get("review_required", 0) + 1
+                        if counts["failed"] == failures_before:
+                            counts["failed"] += 1
+                        error(
+                            db,
+                            run,
+                            exchange,
+                            f"filing:{filing.id} {filing.identifier}",
+                            feed.FeedError(filing.error or filing.status),
+                        )
         except TimeoutError:
             counts["failed"] += 1
+            error(
+                db,
+                run,
+                exchange,
+                "financial-results attachments",
+                feed.FeedError("SOURCE_UNAVAILABLE"),
+            )
     counts["written"] = counts["published"]
-    return None
+    return "; ".join(notes) or None
 
 
 async def public_results(db, company_id):

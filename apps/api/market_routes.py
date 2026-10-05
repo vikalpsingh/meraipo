@@ -5,20 +5,21 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 
 from apps.api import schemas
 from apps.api.repository import record
 from apps.api.schemas import Input
 from apps.api.security import admin
 from apps.worker.exchange_pipeline import PIPELINE_JOBS
-from apps.worker.market import JOBS, create_run
+from apps.worker.market import JOBS, create_run, india_today
 from packages.database import models as m
 from packages.database.session import get_session
 from packages.providers.bse_ipo import configuration as bse_configuration
 from packages.providers.exchanges import discovery_sources
 from packages.providers.market import configuration
 from packages.shared.config import settings
+from packages.shared.job_schedules import EXCHANGE_JOBS, job_parameters, schedule_state
 from packages.shared.market_config import (
     CONFIG_ID,
     EDITABLE_FIELDS,
@@ -66,9 +67,22 @@ async def dispatch(db, job, trigger, data):
     runtime = await load_market_settings(db)
     if trigger == "scheduled" and not runtime.market_scheduler_enabled:
         raise HTTPException(503, "Enable MARKET_SCHEDULER_ENABLED after completing setup")
-    params = {}
-    if job in ("sync-prices", "collect-prices") and data.to_date:
-        if data.to_date > date.today() or (data.from_date and data.from_date != data.to_date):
+    base_job = "sync-" + EXCHANGE_JOBS[job][1] if job in EXCHANGE_JOBS else job
+    params = job_parameters(job)
+    if job in EXCHANGE_JOBS:
+        state = await schedule_state(db, job, runtime)
+        if state["paused"] or not state["source_enabled"]:
+            raise HTTPException(409, "Resume the job and enable its exchange source before running")
+        if await db.scalar(
+            select(m.ImportRun.id)
+            .where(m.ImportRun.job_name == job, m.ImportRun.status.in_(["QUEUED", "RUNNING"]))
+            .limit(1)
+        ):
+            raise HTTPException(
+                409, "This job is already queued or running; inspect its current run"
+            )
+    if base_job in ("sync-prices", "collect-prices") and data.to_date:
+        if data.to_date > india_today() or (data.from_date and data.from_date != data.to_date):
             raise HTTPException(422, "Choose one non-future trading date")
         params["trade_date"] = data.to_date.isoformat()
     if data.retry_rejected:
@@ -80,8 +94,10 @@ async def dispatch(db, job, trigger, data):
         if not company or company.is_demo:
             raise HTTPException(422, "Choose a tracked, non-demo company")
         params["company_id"] = data.company_id
-    if job == "sync-results" and data.from_date and data.to_date:
-        if data.to_date > date.today() or not 0 <= (data.to_date - data.from_date).days <= 1461:
+    if base_job == "sync-results" and bool(data.from_date) != bool(data.to_date):
+        raise HTTPException(422, "Supply both from and to dates")
+    if base_job == "sync-results" and data.from_date and data.to_date:
+        if data.to_date > india_today() or not 0 <= (data.to_date - data.from_date).days <= 1461:
             raise HTTPException(422, "Choose a past date range of up to four years")
         params.update(
             {"from": data.from_date.isoformat(), "to": data.to_date.isoformat(), "history": True}
@@ -115,12 +131,6 @@ async def cron(job: str, request: Request, db=Depends(get_session)):
         request.headers.get("authorization", ""), "Bearer " + secret
     ):
         raise HTTPException(401, "Invalid cron authentication")
-    if job == "sync-results" and data.from_date and data.to_date:
-        if data.to_date > date.today() or not 0 <= (data.to_date - data.from_date).days <= 1461:
-            raise HTTPException(422, "Choose a past date range of up to four years")
-        params.update(
-            {"from": data.from_date.isoformat(), "to": data.to_date.isoformat(), "history": True}
-        )
     if job == "backfill":
         raise HTTPException(404, "Manual job only")
     runtime = await load_market_settings(db)
@@ -227,8 +237,16 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         update(m.ImportRun)
         .where(
             m.ImportRun.job_name.is_not(None),
-            m.ImportRun.status.in_(["RUNNING", "QUEUED"]),
-            m.ImportRun.updated_at < m.now() - timedelta(minutes=10),
+            or_(
+                and_(
+                    m.ImportRun.status == "RUNNING",
+                    m.ImportRun.updated_at < m.now() - timedelta(minutes=10),
+                ),
+                and_(
+                    m.ImportRun.status == "QUEUED",
+                    m.ImportRun.updated_at < m.now() - timedelta(minutes=60),
+                ),
+            ),
         )
         .values(
             status="FAILED",
@@ -371,6 +389,8 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             ),
             holidays=config.trading_holidays.split(","),
         )
+    from apps.api.job_routes import enrich_jobs
+
     return {
         "ipo_data_provider": config.ipo_data_provider,
         "driver": config.market_scheduler_driver,
@@ -425,27 +445,31 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         ],
         "configuration_error": config_error,
         "providers": providers,
-        "jobs": [
-            {
-                "name": name,
-                "label": values[0],
-                "schedule": values[1],
-                "paused": controls.get(name, False),
-                "next_run": (
-                    next_scheduled(
-                        name,
-                        m.now().astimezone(ZoneInfo("Asia/Kolkata")),
-                        config.trading_holidays.split(","),
-                    )
-                    if name.startswith("sync-")
-                    and config.market_scheduler_enabled
-                    and not controls.get(name, False)
-                    else None
-                ),
-                "last": next((record(r) for r in runs if r.job_name == name), None),
-            }
-            for name, values in ALL_JOBS.items()
-        ],
+        "jobs": await enrich_jobs(
+            db,
+            [
+                {
+                    "name": name,
+                    "label": values[0],
+                    "schedule": values[1],
+                    "paused": controls.get(name, False),
+                    "next_run": (
+                        next_scheduled(
+                            name,
+                            m.now().astimezone(ZoneInfo("Asia/Kolkata")),
+                            config.trading_holidays.split(","),
+                        )
+                        if name.startswith("sync-")
+                        and config.market_scheduler_enabled
+                        and not controls.get(name, False)
+                        else None
+                    ),
+                    "last": next((record(r) for r in runs if r.job_name == name), None),
+                }
+                for name, values in ALL_JOBS.items()
+            ],
+            config,
+        ),
         "runs": [record(r) for r in runs],
         "errors": [
             record(e)

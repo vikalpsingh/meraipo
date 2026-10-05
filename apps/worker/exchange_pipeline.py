@@ -26,6 +26,7 @@ from packages.providers.market import (
     safe_url,
 )
 from packages.shared.config import settings
+from packages.shared.job_schedules import EXCHANGE_JOBS, job_parameters
 
 PIPELINE_JOBS = {
     "sync-ipos": ("IPO, subscription & GMP sync", "23:00 daily", ["ipos", "subscriptions", "gmp"]),
@@ -46,6 +47,12 @@ PIPELINE_JOBS = {
     "publish-prices": ("Publish daily closes", "19:00 trading days", ["prices"]),
     "publish-results": ("Publish quarterly results", "21:30 Friday", ["results"]),
 }
+PIPELINE_JOBS.update(
+    {
+        name: (label, "Configurable · IST", [kind])
+        for name, (label, kind, _) in EXCHANGE_JOBS.items()
+    }
+)
 
 
 async def raw_payload(db, provider, kind, url, raw):
@@ -64,6 +71,8 @@ async def raw_payload(db, provider, kind, url, raw):
 
 
 def error(db, run, provider, item, exc):
+    from packages.shared.job_diagnostics import GUIDANCE
+
     code = str(exc) if isinstance(exc, FeedError) else type(exc).__name__
     guidance = {
         "IPOALERTS_AUTH_FAILED": "IPOAlerts rejected the API key (401/403). Set a valid IPOALERTS_API_KEY on the backend and restart API/worker/scheduler. Existing data is retained.",
@@ -95,6 +104,7 @@ def error(db, run, provider, item, exc):
         "NSE_IPO_SCHEMA_CHANGED": "The NSE response no longer matches the expected issue list. Review the retained raw response before updating the parser.",
         "TimeoutError": "The exchange request exceeded its time limit. Retry later; previous published data is retained.",
     }
+    guidance.update(GUIDANCE)
     db.add(
         m.JobError(
             run_id=run.id,
@@ -657,8 +667,12 @@ async def publish(db, run, counts):
 
 
 async def run_pipeline(db, run, download=None):
+    base_job = (
+        "sync-" + EXCHANGE_JOBS[run.job_name][1] if run.job_name in EXCHANGE_JOBS else run.job_name
+    )
+    run.parameters = job_parameters(run.job_name, run.parameters)
     if download is None:
-        if run.job_name == "sync-prices":
+        if base_job == "sync-prices":
             from packages.providers.bhavcopy import download
         else:
             download = ex.download
@@ -674,19 +688,26 @@ async def run_pipeline(db, run, download=None):
     counts = dict(fetched=0, written=0, unchanged=0, failed=0, providers=0)
     try:
         control = await db.get(m.SchedulerControl, run.job_name)
-        if control and control.paused:
+        paused = bool(control and control.paused)
+        if run.job_name in EXCHANGE_JOBS:
+            from packages.shared.job_schedules import schedule_state
+
+            paused = (await schedule_state(db, run.job_name, settings()))["paused"]
+        if paused:
             note = "PAUSED"
-        elif run.job_name == "sync-prices":
+        elif base_job == "sync-prices":
             from apps.worker.bhavcopy import sync
 
             note = await sync(db, run, counts, download=download)
-        elif (
-            run.job_name == "sync-results"
-            and not any(
-                source.kind == "results"
-                for source in ex.discovery_sources(settings().exchange_sources_json)
+        elif base_job == "sync-results" and (
+            run.job_name in EXCHANGE_JOBS
+            or (
+                not any(
+                    source.kind == "results"
+                    for source in ex.discovery_sources(settings().exchange_sources_json)
+                )
+                and not configuration(settings().market_feeds_json).get("results")
             )
-            and not configuration(settings().market_feeds_json).get("results")
         ):
             from apps.worker.results import sync
 
@@ -714,7 +735,14 @@ async def run_pipeline(db, run, download=None):
             if counts["failed"]
             else "SUCCESS" if counts["providers"] else "SKIPPED"
         )
-        run.error = note
+        await db.flush()
+        last_error = await db.scalar(
+            select(m.JobError)
+            .where(m.JobError.run_id == run.id)
+            .order_by(m.JobError.created_at.desc())
+            .limit(1)
+        )
+        run.error = note or (last_error.code if last_error else None)
     except Exception as exc:
         await db.rollback()
         run = await db.get(m.ImportRun, run_id)

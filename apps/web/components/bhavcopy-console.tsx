@@ -129,9 +129,8 @@ export function BhavcopyConsole({ csrf, companies }: { csrf: string; companies: 
     <section className="panel bhavcopy-console" aria-label="Exchange closing files">
       <h3>NSE / BSE daily closing files</h3>
       <p>
-        Daily closing price sync runs at 19:00 Asia/Kolkata, with retries at 20:00 and 22:00.
-        Original files expire after seven days; daily prices and corrections remain available.
-        Prices are unadjusted.
+        Configure NSE and BSE run times independently in Jobs &amp; schedules. Original files expire
+        after seven days; daily prices and corrections remain available. Prices are unadjusted.
       </p>
       {message && <p role="status">{message}</p>}
       <button className="primary-button" disabled={busy} onClick={() => void perform(load)}>

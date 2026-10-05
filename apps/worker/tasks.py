@@ -29,8 +29,7 @@ celery.conf.update(
         name: {"task": "meraipo.scheduled_market", "schedule": schedule, "args": [name]}
         for name, schedule in {
             "sync-ipos": crontab(hour=23, minute=0),
-            "sync-prices": crontab(hour="19,20,22", minute=0),
-            "sync-results": crontab(minute="*"),
+            "exchange-jobs": crontab(minute="*"),
         }.items()
     },
 )
@@ -120,38 +119,33 @@ def scheduled_market(job):
                 if (
                     not runtime.market_scheduler_enabled
                     or runtime.market_scheduler_driver != "celery"
-                    or job not in PIPELINE_JOBS
+                    or (job not in PIPELINE_JOBS and job != "exchange-jobs")
+                    or job in ("sync-prices", "sync-results")
                 ):
                     return {"status": "DISABLED"}
-                if job == "sync-results":
-                    from zoneinfo import ZoneInfo
+                if job == "exchange-jobs":
+                    from celery import chain
 
+                    from apps.worker.scheduling import claim_due
                     from packages.database import models as m
 
-                    local = datetime.now(ZoneInfo("Asia/Kolkata"))
-                    sources = (await db.scalars(select(m.ResultSource))).all()
-                    due = [
-                        s.exchange
-                        for s in sources
-                        if s.enabled and s.schedule == local.strftime("%H:%M")
-                    ]
-                    if not sources and local.strftime("%H:%M") == "19:30":
-                        due = ["BSE", "NSE"]
-                    if not due:
-                        return {"status": "NOT_DUE"}
-                    prior = await db.scalar(
-                        select(ImportRun.id).where(
-                            ImportRun.job_name == job,
-                            ImportRun.trigger == "scheduled",
-                            ImportRun.created_at >= local.replace(second=0, microsecond=0),
-                        )
-                    )
-                    if prior:
-                        return {"status": "ALREADY_QUEUED"}
+                    ids = await claim_due(db, runtime, m.now())
+                    if ids:
+                        try:
+                            chain(*(market_job.si(run_id) for run_id in ids)).apply_async()
+                        except Exception:
+                            for run_id in ids:
+                                run = await db.get(ImportRun, run_id)
+                                run.status, run.error, run.finished_at = (
+                                    "FAILED",
+                                    "QUEUE_UNAVAILABLE",
+                                    m.now(),
+                                )
+                            await db.commit()
+                            raise
+                    return {"queued": len(ids)}
                 async with market_settings_context(db):
-                    run = await create_run(
-                        db, job, "scheduled", {"exchanges": due} if job == "sync-results" else None
-                    )
+                    run = await create_run(db, job, "scheduled")
                     try:
                         market_job.delay(run.id)
                     except Exception:
@@ -205,19 +199,36 @@ def results_history():
                 ).all()
                 jobs = []
                 today = india_today()
+                from packages.shared.job_schedules import schedule_state
+
                 for company in companies:
-                    run = await create_run(
-                        db,
-                        "sync-results",
-                        "reconciliation",
-                        {
-                            "company_id": company.id,
-                            "from": (today - timedelta(days=1461)).isoformat(),
-                            "to": today.isoformat(),
-                            "history": True,
-                        },
-                    )
-                    jobs.append(market_job.si(run.id))
+                    exchanges = (
+                        await db.scalars(
+                            select(m.Identifier.exchange)
+                            .where(
+                                m.Identifier.company_id == company.id,
+                                m.Identifier.exchange.in_(["NSE", "BSE"]),
+                            )
+                            .distinct()
+                        )
+                    ).all()
+                    for exchange in exchanges:
+                        job_name = f"sync-results-{exchange.lower()}"
+                        state = await schedule_state(db, job_name, runtime)
+                        if state["paused"] or not state["source_enabled"]:
+                            continue
+                        run = await create_run(
+                            db,
+                            job_name,
+                            "reconciliation",
+                            {
+                                "company_id": company.id,
+                                "from": (today - timedelta(days=1461)).isoformat(),
+                                "to": today.isoformat(),
+                                "history": True,
+                            },
+                        )
+                        jobs.append(market_job.si(run.id))
                 if jobs:
                     chain(*jobs).apply_async()
                 return {"queued": len(jobs)}

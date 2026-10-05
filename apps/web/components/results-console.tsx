@@ -140,17 +140,10 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
           </form>
         );
       })}
-      <button
-        disabled={busy}
-        onClick={() =>
-          void perform(async () => {
-            await request('market/sync-results/run', JSON.stringify({}));
-            setMessage('Discovery queued');
-          })
-        }
-      >
-        Discover results now
-      </button>
+      <p className="small">
+        Run individual exchange discovery from Jobs &amp; schedules. Use a bounded historical range
+        below for recovery.
+      </p>
       <form
         className="filters"
         onSubmit={(e) => {
@@ -158,7 +151,7 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
           const f = new FormData(e.currentTarget);
           void perform(async () => {
             await request(
-              'market/sync-results/run',
+              `market/sync-results-${f.get('exchange')}/run`,
               JSON.stringify({
                 from_date: f.get('from'),
                 to_date: f.get('to'),
@@ -170,6 +163,13 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
           });
         }}
       >
+        <label>
+          Exchange
+          <select name="exchange">
+            <option value="nse">NSE</option>
+            <option value="bse">BSE</option>
+          </select>
+        </label>
         <label>
           From
           <input name="from" type="date" required />

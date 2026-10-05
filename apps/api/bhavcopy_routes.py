@@ -45,6 +45,14 @@ async def save_sources(data: SourceSettings, auth=Depends(admin), db=Depends(get
         ),
     }
     row.updated_by = auth[0].id
+    db.add(
+        m.Audit(
+            admin_id=auth[0].id,
+            action="market.price_sources",
+            entity_id="market",
+            changes={"exchanges": list(parsed)},
+        )
+    )
     from apps.api.cache import commit_with_invalidation
 
     await commit_with_invalidation(db)
@@ -60,7 +68,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         )
     ).all()
     return {
-        "schedule": "19:00, 20:00, 22:00",
+        "schedule": "Configured independently in Jobs & schedules",
         "timezone": "Asia/Kolkata",
         "retention_days": 7,
         "sources": [
@@ -161,7 +169,14 @@ async def run_dates(data: Run, auth=Depends(admin), db=Depends(get_session)):
             params["exchange"] = data.exchange
         if data.upload_id:
             params["upload_id"] = data.upload_id
-        runs.append(await create_run(db, "sync-prices", "manual", params))
+        runs.append(
+            await create_run(
+                db,
+                f"sync-prices-{data.exchange.lower()}" if data.exchange else "sync-prices",
+                "manual",
+                params,
+            )
+        )
     try:
         from celery import chain
 

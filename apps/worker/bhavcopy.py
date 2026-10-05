@@ -356,11 +356,27 @@ async def sync(db, run, counts, download=feed.download):
     if day > india_today():
         raise FeedError("FUTURE_TRADE_DATE")
     exchanges = [params["exchange"]] if params.get("exchange") else ["NSE", "BSE"]
+    notes = []
     for exchange in exchanges:
         artifact = await process_source(
             db, run, exchange, day, download=download, upload=params.get("upload_id")
         )
         result = artifact.counters or {}
+        if artifact.status in ("RATE_LIMITED_RETRY_LATER", "BLOCKED_ADMIN_REQUIRED"):
+            from packages.shared.job_diagnostics import guidance
+
+            counts["failed"] += 1
+            db.add(
+                m.JobError(
+                    run_id=run.id,
+                    provider=exchange,
+                    item=str(day),
+                    code=artifact.status,
+                    detail=guidance(artifact.status),
+                )
+            )
+        if artifact.status not in ("SUCCESS", "PARTIAL"):
+            notes.append(f"{exchange}: {artifact.error or artifact.status}")
         counts["fetched"] += result.get("rows", 0)
         counts["written"] += result.get("inserted", 0) + result.get("updated", 0)
         counts["unchanged"] += result.get("unchanged", 0)
@@ -371,4 +387,4 @@ async def sync(db, run, counts, download=feed.download):
         # Sources commit independently; a BSE failure cannot roll back a successful NSE import.
         await db.commit()
     counts["listing_prices_populated"] = await refresh_listing_prices(db)
-    return None
+    return "; ".join(notes) or None

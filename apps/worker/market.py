@@ -659,9 +659,7 @@ async def run_job(db, run, fetch=fetch_feed):
         run.status = (
             ("PARTIAL" if counters["providers"] else "FAILED")
             if counters["failed"]
-            else "SUCCESS"
-            if counters["providers"]
-            else "SKIPPED"
+            else "SUCCESS" if counters["providers"] else "SKIPPED"
         )
         if notes and run.status == "SUCCESS":
             run.status = "PARTIAL"
@@ -684,13 +682,15 @@ async def run_job(db, run, fetch=fetch_feed):
 
 
 async def create_run(db, job, trigger, parameters=None):
+    from packages.shared.job_schedules import job_parameters
+
     run = m.ImportRun(
         key=f"market:{uuid4()}",
         provider="market-feeds",
         job_name=job,
         trigger=trigger,
         status="QUEUED",
-        parameters=parameters or {},
+        parameters=job_parameters(job, parameters),
     )
     db.add(run)
     await db.commit()
