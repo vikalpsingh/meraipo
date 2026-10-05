@@ -745,7 +745,7 @@ export default function Console() {
           ))}
         </section>
       )}
-      <JobErrorLog />
+      {tab !== 'Data & scheduler' && <JobErrorLog />}
     </>
   );
 }

@@ -38,10 +38,12 @@ export function JobHistory({
   jobs,
   initialJob = '',
   initialRun = '',
+  csrf,
 }: {
   jobs: ScheduledJob[];
   initialJob?: string;
   initialRun?: string;
+  csrf?: string;
 }) {
   const [job, setJob] = useState(initialJob),
     [status, setStatus] = useState(''),
@@ -141,9 +143,11 @@ export function JobHistory({
             }}
           >
             <option value="">All statuses</option>
-            {['QUEUED', 'RUNNING', 'SUCCESS', 'PARTIAL', 'FAILED', 'SKIPPED'].map((s) => (
-              <option key={s}>{s}</option>
-            ))}
+            {['QUEUED', 'RUNNING', 'SUCCESS', 'PARTIAL', 'FAILED', 'SKIPPED', 'CANCELLED'].map(
+              (s) => (
+                <option key={s}>{s}</option>
+              ),
+            )}
           </select>
         </label>
       </div>
@@ -231,6 +235,36 @@ export function JobHistory({
               <p>
                 <RunStatus status={detail.run.status} /> {detail.run.summary}
               </p>
+              {detail.run.status === 'QUEUED' && csrf && (
+                <button
+                  className="outline-button"
+                  onClick={async () => {
+                    try {
+                      const r = await fetch(`/api/v1/admin/market/runs/${selected}/cancel`, {
+                        method: 'POST',
+                        headers: { 'X-CSRF-Token': csrf },
+                      });
+                      if (!r.ok)
+                        throw new Error(
+                          'Could not cancel; the job may have started. Refresh its status.',
+                        );
+                      setDetail({
+                        ...detail,
+                        run: {
+                          ...detail.run,
+                          status: 'CANCELLED',
+                          summary: 'Cancelled before execution.',
+                        },
+                      });
+                      setHistory(await refresh());
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : 'Cancel failed');
+                    }
+                  }}
+                >
+                  Cancel queued run
+                </button>
+              )}
               <dl className="job-facts">
                 <div>
                   <dt>Run ID · use in worker logs</dt>

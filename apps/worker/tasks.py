@@ -28,15 +28,16 @@ celery.conf.update(
     beat_schedule={
         name: {"task": "meraipo.scheduled_market", "schedule": schedule, "args": [name]}
         for name, schedule in {
-            "sync-ipos": crontab(hour=23, minute=0),
             "exchange-jobs": crontab(minute="*"),
         }.items()
     },
 )
 
 
-@celery.task(name="meraipo.market", soft_time_limit=240, time_limit=300)
-def market_job(run_id):
+@celery.task(
+    bind=True, name="meraipo.market", soft_time_limit=240, time_limit=300, max_retries=None
+)
+def market_job(self, run_id):
     from apps.worker.market import run_job
 
     async def execute_market():
@@ -54,7 +55,10 @@ def market_job(run_id):
 
             await client.aclose()
 
-    return asyncio.run(execute_market())
+    result = asyncio.run(execute_market())
+    if result["status"] == "QUEUED":
+        raise self.retry(countdown=15, max_retries=None)
+    return result
 
 
 async def execute(kind, key):
@@ -120,7 +124,7 @@ def scheduled_market(job):
                     not runtime.market_scheduler_enabled
                     or runtime.market_scheduler_driver != "celery"
                     or (job not in PIPELINE_JOBS and job != "exchange-jobs")
-                    or job in ("sync-prices", "sync-results")
+                    or job in ("sync-prices", "sync-results", "sync-ipos")
                 ):
                     return {"status": "DISABLED"}
                 if job == "exchange-jobs":
@@ -161,7 +165,7 @@ def scheduled_market(job):
 
 celery.conf.beat_schedule["results-weekly-history"] = {
     "task": "meraipo.results_history",
-    "schedule": crontab(hour=20, minute=30, day_of_week="0"),
+    "schedule": crontab(hour=0, minute=0, day_of_week="1"),
 }
 
 

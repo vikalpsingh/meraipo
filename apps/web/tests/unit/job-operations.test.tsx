@@ -59,7 +59,12 @@ it('runs and configures each exchange independently without loading recovery for
       '/api/v1/admin/market/sync-prices-nse/schedule',
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ times: ['18:30', '21:00'], paused: false }),
+        body: JSON.stringify({
+          frequency: 'daily',
+          weekday: 0,
+          times: ['18:30', '21:00'],
+          paused: false,
+        }),
       }),
     ),
   );
@@ -75,34 +80,32 @@ it('filters history and shows failure guidance tied to the selected run', async 
     error: 'SOURCE_ACCESS_BLOCKED',
     trigger: 'manual',
   };
-  const fetchMock = vi
-    .spyOn(globalThis, 'fetch')
-    .mockImplementation(
-      async (url) =>
-        new Response(
-          JSON.stringify(
-            String(url).endsWith('/failed-run')
-              ? {
-                  run,
-                  guidance: 'Verify permitted exchange access',
-                  error_count: 1,
-                  errors: [
-                    {
-                      id: 'e',
-                      provider: 'BSE',
-                      item: '2026-10-05',
-                      code: 'SOURCE_ACCESS_BLOCKED',
-                      detail: 'Access denied',
-                      guidance: 'Verify permitted exchange access',
-                    },
-                  ],
-                  files: [],
-                }
-              : { items: [run], total: 1, page_size: 25 },
-          ),
-          { status: 200 },
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+    async (url) =>
+      new Response(
+        JSON.stringify(
+          String(url).endsWith('/failed-run')
+            ? {
+                run,
+                guidance: 'Verify permitted exchange access',
+                error_count: 1,
+                errors: [
+                  {
+                    id: 'e',
+                    provider: 'BSE',
+                    item: '2026-10-05',
+                    code: 'SOURCE_ACCESS_BLOCKED',
+                    detail: 'Access denied',
+                    guidance: 'Verify permitted exchange access',
+                  },
+                ],
+                files: [],
+              }
+            : { items: [run], total: 1, page_size: 25 },
         ),
-    );
+        { status: 200 },
+      ),
+  );
   render(<JobHistory jobs={jobs} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Inspect run' }));
   expect(await screen.findAllByText('Verify permitted exchange access')).not.toHaveLength(0);
@@ -112,6 +115,54 @@ it('filters history and shows failure guidance tied to the selected run', async 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('status=FAILED'),
       expect.anything(),
+    ),
+  );
+});
+
+it('offers hourly and weekly timing configuration', async () => {
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(
+      async (url, init) =>
+        new Response(
+          JSON.stringify(
+            init?.method
+              ? { saved: true }
+              : { enabled: true, driver: 'celery', configuration_error: null, jobs },
+          ),
+          { status: 200 },
+        ),
+    );
+  render(<MarketConsole csrf="test-csrf" companies={[]} />);
+  const card = (await screen.findByRole('heading', { name: 'NSE · Quarterly results' })).closest(
+    'article',
+  )!;
+  fireEvent.click(within(card).getByText('Schedule & configuration'));
+  fireEvent.change(within(card).getByLabelText('Frequency'), { target: { value: 'hourly' } });
+  fireEvent.change(within(card).getByLabelText('Minute past each hour (IST)'), {
+    target: { value: '15' },
+  });
+  fireEvent.click(within(card).getByRole('button', { name: 'Save schedule' }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/admin/market/sync-results-nse/schedule',
+      expect.objectContaining({
+        body: JSON.stringify({ frequency: 'hourly', weekday: 0, times: ['00:15'], paused: false }),
+      }),
+    ),
+  );
+  await waitFor(() =>
+    expect(within(card).getByRole('button', { name: 'Save schedule' })).not.toBeDisabled(),
+  );
+  fireEvent.change(within(card).getByLabelText('Frequency'), { target: { value: 'weekly' } });
+  fireEvent.change(within(card).getByLabelText('Day of week'), { target: { value: '6' } });
+  fireEvent.click(within(card).getByRole('button', { name: 'Save schedule' }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/admin/market/sync-results-nse/schedule',
+      expect.objectContaining({
+        body: JSON.stringify({ frequency: 'weekly', weekday: 6, times: ['19:30'], paused: false }),
+      }),
     ),
   );
 });

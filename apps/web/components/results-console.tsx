@@ -102,8 +102,8 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
     <section className="panel" aria-label="Financial results importer">
       <h2>Financial results importer</h2>
       <p>
-        Daily discovery and a rolling 14-day reconciliation. Originals and revisions are retained.
-        Unverified figures require review.
+        Configurable discovery and a rolling 14-day reconciliation. Originals and revisions are
+        retained. Unverified figures require review.
       </p>
       {message && <p role="status">{message}</p>}
       {['BSE', 'NSE'].map((exchange) => {
@@ -131,7 +131,12 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
             </label>
             <label>
               Time (IST)
-              <input name="schedule" type="time" defaultValue={s?.schedule || '19:30'} required />
+              <input
+                name="schedule"
+                type="time"
+                defaultValue={s?.schedule || (exchange === 'NSE' ? '21:00' : '22:00')}
+                required
+              />
             </label>
             <button disabled={busy}>Save {exchange} schedule</button>
             <span>

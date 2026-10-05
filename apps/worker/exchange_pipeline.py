@@ -5,7 +5,7 @@ import time
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select, update
 
 from apps.worker.market import (
     acquire,
@@ -26,7 +26,7 @@ from packages.providers.market import (
     safe_url,
 )
 from packages.shared.config import settings
-from packages.shared.job_schedules import EXCHANGE_JOBS, job_parameters
+from packages.shared.job_schedules import EXCHANGE_JOBS, SCHEDULED_JOBS, job_parameters
 
 PIPELINE_JOBS = {
     "sync-ipos": ("IPO, subscription & GMP sync", "23:00 daily", ["ipos", "subscriptions", "gmp"]),
@@ -678,18 +678,50 @@ async def run_pipeline(db, run, download=None):
             download = ex.download
     if run.status != "QUEUED":
         return run
+    if run.job_name in SCHEDULED_JOBS:
+        earlier = await db.scalar(
+            select(m.ImportRun.id)
+            .where(
+                m.ImportRun.job_name.in_(SCHEDULED_JOBS),
+                m.ImportRun.status == "QUEUED",
+                or_(
+                    m.ImportRun.created_at < run.created_at,
+                    and_(m.ImportRun.created_at == run.created_at, m.ImportRun.id < run.id),
+                ),
+            )
+            .order_by(m.ImportRun.created_at, m.ImportRun.id)
+            .limit(1)
+        )
+        if earlier:
+            run.error, run.updated_at = f"WAITING_FOR_PREVIOUS_JOB: {earlier}", m.now()
+            await db.commit()
+            return run
     if not await acquire(db, run.id):
+        if run.job_name in SCHEDULED_JOBS:
+            run.error, run.updated_at = "WAITING_FOR_PREVIOUS_JOB: active data import", m.now()
+            await db.commit()
+            return run
         run.status, run.error, run.finished_at = "SKIPPED", "Another market job is running", m.now()
         await db.commit()
         return run
-    run.status, run.started_at = "RUNNING", m.now()
+    claimed = await db.execute(
+        update(m.ImportRun)
+        .where(m.ImportRun.id == run.id, m.ImportRun.status == "QUEUED")
+        .values(status="RUNNING", started_at=m.now(), error=None)
+    )
+    if not claimed.rowcount:
+        await db.execute(delete(m.JobLock).where(m.JobLock.owner == run.id))
+        await db.commit()
+        await db.refresh(run)
+        return run
+    await db.refresh(run)
     await db.commit()
     run_id = run.id
     counts = dict(fetched=0, written=0, unchanged=0, failed=0, providers=0)
     try:
         control = await db.get(m.SchedulerControl, run.job_name)
         paused = bool(control and control.paused)
-        if run.job_name in EXCHANGE_JOBS:
+        if run.job_name in SCHEDULED_JOBS:
             from packages.shared.job_schedules import schedule_state
 
             paused = (await schedule_state(db, run.job_name, settings()))["paused"]

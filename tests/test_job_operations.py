@@ -171,7 +171,7 @@ async def test_migration_defaults_honor_parent_pause_and_disabled_sources(
     await db.commit()
     at = datetime(2026, 10, 5, 19, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
     assert await claim_due(db, settings(), at) == []
-    ids = await claim_due(db, settings(), at.replace(minute=30))
+    ids = await claim_due(db, settings(), at.replace(hour=21, minute=0))
     assert len(ids) == 1
     assert (await db.get(m.ImportRun, ids[0])).job_name == "sync-results-nse"
 
@@ -208,3 +208,98 @@ async def test_manual_exchange_dispatch_dates_and_queue_failure(
     assert response.status_code == 503
     failed = await db.scalar(select(m.ImportRun).where(m.ImportRun.job_name == "sync-results-bse"))
     assert failed.status == "FAILED" and failed.finished_at is not None
+
+
+@pytest.mark.parametrize(
+    "frequency,times,weekday,at,expected",
+    [
+        ("hourly", ["00:15"], 0, "2026-10-05T19:14:00+05:30", "2026-10-05T19:15:00+05:30"),
+        ("hourly", ["00:15"], 0, "2026-10-05T23:15:00+05:30", "2026-10-06T00:15:00+05:30"),
+        ("weekly", ["20:00"], 4, "2026-10-05T19:00:00+05:30", "2026-10-09T20:00:00+05:30"),
+        ("weekly", ["20:00"], 0, "2026-10-05T20:00:00+05:30", "2026-10-12T20:00:00+05:30"),
+    ],
+)
+def test_frequency_next_run(frequency, times, weekday, at, expected):
+    from packages.shared.job_schedules import is_due
+
+    at = datetime.fromisoformat(at)
+    assert next_slot(times, at, frequency, weekday) == expected
+    assert is_due(
+        {"frequency": frequency, "times": times, "weekday": weekday},
+        datetime.fromisoformat(expected),
+    )
+
+
+async def test_hourly_weekly_and_ipo_schedules(admin_client, db, monkeypatch, tmp_path):
+    config(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings(), "market_scheduler_enabled", True)
+    monkeypatch.setattr(settings(), "market_scheduler_driver", "celery")
+    for job, frequency, times, weekday in [
+        ("sync-ipos", "hourly", ["00:15"], 0),
+        ("sync-results-nse", "weekly", ["20:15"], 4),
+    ]:
+        r = await admin_client.put(
+            f"/api/v1/admin/market/{job}/schedule",
+            json={"times": times, "paused": False, "frequency": frequency, "weekday": weekday},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["frequency"] == frequency
+    monday = datetime(2026, 10, 5, 20, 15, tzinfo=ZoneInfo("Asia/Kolkata"))
+    ids = await claim_due(db, settings(), monday)
+    assert [(await db.get(m.ImportRun, id)).job_name for id in ids] == ["sync-ipos"]
+    ids = await claim_due(db, settings(), monday + timedelta(days=4))
+    assert {(await db.get(m.ImportRun, id)).job_name for id in ids} == {
+        "sync-ipos",
+        "sync-results-nse",
+    }
+
+
+async def test_waits_for_previous_job_then_runs_in_fifo_order(db, monkeypatch, tmp_path):
+    from sqlalchemy import delete
+    from apps.worker.market import acquire
+
+    config(monkeypatch, tmp_path)
+    await tracked(db, "LISTED")
+    first = await create_run(db, "sync-prices-nse", "manual", {"trade_date": str(DAY)})
+    second = await create_run(db, "sync-prices-bse", "manual", {"trade_date": str(DAY)})
+    calls = []
+
+    async def download(url):
+        calls.append(url)
+        return CSV.replace(b"NSE", b"BSE" if "bse" in url else b"NSE")
+
+    assert await acquire(db, "existing-job")
+    await db.commit()
+    await run_pipeline(db, second, download)
+    await run_pipeline(db, first, download)
+    assert first.status == second.status == "QUEUED" and calls == []
+    assert first.started_at is None and second.started_at is None
+    assert first.error.startswith("WAITING_FOR_PREVIOUS_JOB")
+    await db.execute(delete(m.JobLock).where(m.JobLock.owner == "existing-job"))
+    await db.commit()
+    # Even with the writer free, the later queued job cannot jump ahead.
+    await run_pipeline(db, second, download)
+    assert second.status == "QUEUED" and calls == []
+    await run_pipeline(db, first, download)
+    await run_pipeline(db, second, download)
+    assert first.status == second.status == "SUCCESS"
+    assert "nse" in calls[0] and "bse" in calls[1]
+    assert first.error is None and second.error is None
+
+
+async def test_queued_cancellation_does_not_execute(db, admin_client, monkeypatch, tmp_path):
+    config(monkeypatch, tmp_path)
+    run = await create_run(db, "sync-prices-nse", "manual", {"trade_date": str(DAY)})
+    response = await admin_client.post(f"/api/v1/admin/market/runs/{run.id}/cancel")
+    assert response.status_code == 200
+    called = []
+
+    async def download(url):
+        called.append(url)
+        return CSV
+
+    await run_pipeline(db, run, download)
+    assert run.status == "CANCELLED" and not called
+    assert (
+        await admin_client.post(f"/api/v1/admin/market/runs/{run.id}/cancel")
+    ).status_code == 409

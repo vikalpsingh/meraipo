@@ -39,16 +39,22 @@ function JobCard({
   inspect: (job: string, run?: string) => void;
   configure: () => void;
 }) {
+  const [frequency, setFrequency] = useState(job.frequency || 'daily');
   const active = job.last?.status === 'QUEUED' || job.last?.status === 'RUNNING';
   const disabled = busy || active || job.paused || job.source_enabled === false;
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
     void action(job.name, 'schedule', {
-      times: String(values.get('times'))
-        .split(',')
-        .map((v) => v.trim())
-        .filter(Boolean),
+      frequency,
+      weekday: Number(values.get('weekday') || 0),
+      times:
+        frequency === 'hourly'
+          ? [`00:${String(values.get('minute')).padStart(2, '0')}`]
+          : String(values.get('times'))
+              .split(',')
+              .map((v) => v.trim())
+              .filter(Boolean),
       paused: job.paused,
     });
   }
@@ -76,6 +82,12 @@ function JobCard({
         <span>{job.paused ? 'Schedule paused' : 'Schedule active'}</span>
         {job.source_enabled === false && <strong>Source disabled</strong>}
       </div>
+      <p className="small">
+        {job.frequency === 'hourly'
+          ? `Hourly · minute ${job.times?.[0]?.slice(3)}`
+          : `${job.frequency === 'weekly' ? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][job.weekday || 0] : 'Daily'} · ${job.times?.join(', ') || job.schedule}`}{' '}
+        IST
+      </p>
       <dl className="job-facts">
         <div>
           <dt>Next run (IST)</dt>
@@ -137,22 +149,65 @@ function JobCard({
         {job.configurable ? (
           <form onSubmit={save} key={(job.times || []).join(',')}>
             <label>
-              Run times (IST)
-              {job.name.includes('results') ? (
-                <input name="times" type="time" required defaultValue={job.times?.[0] || '19:30'} />
-              ) : (
+              Frequency
+              <select
+                value={frequency}
+                onChange={(e) => setFrequency(e.target.value as 'hourly' | 'daily' | 'weekly')}
+              >
+                <option value="hourly">Hourly</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+            {frequency === 'hourly' ? (
+              <label key="hourly-minute">
+                Minute past each hour (IST)
+                <input
+                  name="minute"
+                  type="number"
+                  min="0"
+                  max="59"
+                  required
+                  defaultValue={Number(job.times?.[0]?.slice(3) || 0)}
+                />
+              </label>
+            ) : (
+              <label key="scheduled-time">
+                Run times (IST)
                 <input
                   name="times"
                   required
                   defaultValue={job.times?.join(', ')}
-                  placeholder="19:00, 20:00, 22:00"
+                  placeholder="19:00"
                 />
-              )}
-            </label>
+              </label>
+            )}
+            {frequency === 'weekly' && (
+              <label>
+                Day of week
+                <select name="weekday" defaultValue={job.weekday ?? 0}>
+                  {[
+                    'Monday',
+                    'Tuesday',
+                    'Wednesday',
+                    'Thursday',
+                    'Friday',
+                    'Saturday',
+                    'Sunday',
+                  ].map((day, index) => (
+                    <option key={day} value={index}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <p className="small">
-              {job.name.includes('prices')
-                ? 'Comma-separated 24-hour times; up to six daily attempts. '
-                : ''}
+              {frequency === 'hourly'
+                ? 'Runs every hour at the selected minute.'
+                : frequency === 'weekly'
+                  ? 'One 24-hour HH:MM time on the selected weekday.'
+                  : '24-hour HH:MM time; price jobs also accept comma-separated retry times.'}{' '}
               {job.schedule_note}
             </p>
             <button className="outline-button" disabled={busy}>
@@ -166,7 +221,7 @@ function JobCard({
           Open source configuration →
         </button>
       </details>
-      {job.configurable && (
+      {job.configurable && job.name !== 'sync-ipos' && (
         <details className="job-settings">
           <summary>Run for a specific date{job.name.includes('results') ? ' range' : ''}</summary>
           <form onSubmit={backfill} className="job-date-form">
@@ -253,7 +308,16 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
     setSelection({ job, run });
     setSection('history');
   }
-  const primary = data?.jobs.filter((j) => j.configurable || j.name === 'sync-ipos') || [];
+  const jobOrder = [
+    'sync-prices-nse',
+    'sync-prices-bse',
+    'sync-results-nse',
+    'sync-results-bse',
+    'sync-ipos',
+  ];
+  const primary = [...(data?.jobs.filter((j) => jobOrder.includes(j.name)) || [])].sort(
+    (a, b) => jobOrder.indexOf(a.name) - jobOrder.indexOf(b.name),
+  );
   return (
     <section className="job-operations" aria-labelledby="market-heading">
       <div className="section-heading">
@@ -337,13 +401,13 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
         <>
           <p className="small">
             NSE and BSE run independently. Successful imports remain available if another source
-            fails. Jobs scheduled together are processed sequentially. Counts refer to records, not
-            companies.
+            fails. Jobs run in queue order. If an earlier job is still running, the next waits
+            automatically. Counts refer to records, not companies.
           </p>
           <div className="job-grid">
             {primary.map((job) => (
               <JobCard
-                key={job.name}
+                key={`${job.name}:${job.frequency}:${job.weekday}:${job.times?.join(',')}`}
                 job={job}
                 busy={busy}
                 action={action}
@@ -365,6 +429,7 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
       )}
       {section === 'history' && (
         <JobHistory
+          csrf={csrf}
           key={selection.job + selection.run}
           jobs={data?.jobs || []}
           initialJob={selection.job}

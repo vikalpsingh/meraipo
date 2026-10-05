@@ -10,6 +10,7 @@ from sqlalchemy import select
 from packages.database import models as m
 from packages.providers import results as feed
 from packages.shared.calculations import utc
+from packages.shared.job_schedules import DEFAULT_TIMES
 
 
 def digest(value):
@@ -228,8 +229,17 @@ async def sync(db, run, counts, session_factory=feed.ExchangeSession):
     for exchange in parameters.get("exchanges", ["BSE", "NSE"]):
         state = await db.get(m.ResultSource, exchange)
         if not state:
+            job_name = f"sync-results-{exchange.lower()}"
+            control = await db.get(m.SchedulerControl, job_name)
             state = m.ResultSource(
-                exchange=exchange, enabled=True, schedule="19:30", status="NOT_YET_RUN"
+                exchange=exchange,
+                enabled=True,
+                schedule=(
+                    control.schedule_times[0]
+                    if control and control.schedule_times
+                    else DEFAULT_TIMES[job_name]
+                ),
+                status="NOT_YET_RUN",
             )
             db.add(state)
             await db.flush()

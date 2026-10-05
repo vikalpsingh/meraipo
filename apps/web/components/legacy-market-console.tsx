@@ -98,10 +98,10 @@ export function LegacyMarketConsole({ csrf, companies }: { csrf: string; compani
   }
 
   return (
-    <section aria-labelledby="market-heading">
+    <section aria-labelledby="legacy-market-heading">
       <div className="section-heading">
         <div>
-          <h2 id="market-heading">Advanced collection & publication</h2>
+          <h2 id="legacy-market-heading">Advanced collection & publication</h2>
           <p className="muted">
             All times are India Standard Time. Your public pages keep the last successfully imported
             data.

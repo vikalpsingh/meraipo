@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import func, select, update
 
 from apps.api import schemas
 from apps.api.repository import record
@@ -19,7 +19,12 @@ from packages.providers.bse_ipo import configuration as bse_configuration
 from packages.providers.exchanges import discovery_sources
 from packages.providers.market import configuration
 from packages.shared.config import settings
-from packages.shared.job_schedules import EXCHANGE_JOBS, job_parameters, schedule_state
+from packages.shared.job_schedules import (
+    EXCHANGE_JOBS,
+    SCHEDULED_JOBS,
+    job_parameters,
+    schedule_state,
+)
 from packages.shared.market_config import (
     CONFIG_ID,
     EDITABLE_FIELDS,
@@ -69,7 +74,7 @@ async def dispatch(db, job, trigger, data):
         raise HTTPException(503, "Enable MARKET_SCHEDULER_ENABLED after completing setup")
     base_job = "sync-" + EXCHANGE_JOBS[job][1] if job in EXCHANGE_JOBS else job
     params = job_parameters(job)
-    if job in EXCHANGE_JOBS:
+    if job in SCHEDULED_JOBS:
         state = await schedule_state(db, job, runtime)
         if state["paused"] or not state["source_enabled"]:
             raise HTTPException(409, "Resume the job and enable its exchange source before running")
@@ -237,17 +242,10 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         update(m.ImportRun)
         .where(
             m.ImportRun.job_name.is_not(None),
-            or_(
-                and_(
-                    m.ImportRun.status == "RUNNING",
-                    m.ImportRun.updated_at < m.now() - timedelta(minutes=10),
-                ),
-                and_(
-                    m.ImportRun.status == "QUEUED",
-                    m.ImportRun.updated_at < m.now() - timedelta(minutes=60),
-                ),
-            ),
+            m.ImportRun.status == "RUNNING",
+            m.ImportRun.updated_at < m.now() - timedelta(minutes=10),
         )
+        .execution_options(synchronize_session="fetch")
         .values(
             status="FAILED",
             error="WORKER_TIMEOUT: retry after checking worker health",

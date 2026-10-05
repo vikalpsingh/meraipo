@@ -1,10 +1,10 @@
 """Admin-only run diagnostics and independent exchange schedule controls."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import Field, StringConstraints
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from apps.api.repository import record
 from apps.api.schemas import Input
@@ -14,7 +14,7 @@ from packages.database.session import get_session
 from packages.providers.market import safe_url
 from packages.shared.calculations import utc
 from packages.shared.job_diagnostics import guidance
-from packages.shared.job_schedules import EXCHANGE_JOBS, next_slot, schedule_state
+from packages.shared.job_schedules import EXCHANGE_JOBS, SCHEDULED_JOBS, next_slot, schedule_state
 from packages.shared.market_config import load_market_settings
 
 router = APIRouter(prefix="/admin/market")
@@ -24,12 +24,18 @@ Slot = Annotated[str, StringConstraints(pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-
 class ScheduleInput(Input):
     times: list[Slot] = Field(min_length=1, max_length=6)
     paused: bool
+    frequency: Literal["hourly", "daily", "weekly"] = "daily"
+    weekday: int = Field(0, ge=0, le=6)
 
 
 def run_record(run):
     if not run:
         return None
     data = record(run)
+    if run.status == "QUEUED" and (run.error or "").startswith("WAITING_FOR_PREVIOUS_JOB"):
+        data["summary"] = (
+            "Queued — waiting for the previous job to finish. Starts automatically when the data writer is available."
+        )
     end = run.finished_at or m.now()
     data["duration_seconds"] = (
         max(0, round((utc(end) - utc(run.started_at)).total_seconds())) if run.started_at else None
@@ -42,13 +48,17 @@ def run_record(run):
             else "Scan completed; no matching new records to publish."
         )
     else:
-        data["summary"] = run.error or {
-            "QUEUED": "Waiting for a worker.",
-            "RUNNING": "Import in progress.",
-            "SKIPPED": "No import performed.",
-            "PARTIAL": "Some records failed; inspect diagnostics.",
-            "FAILED": "Import failed; inspect diagnostics.",
-        }.get(run.status, run.status)
+        data["summary"] = (
+            data.get("summary")
+            or run.error
+            or {
+                "QUEUED": "Waiting for a worker.",
+                "RUNNING": "Import in progress.",
+                "SKIPPED": "No import performed.",
+                "PARTIAL": "Some records failed; inspect diagnostics.",
+                "FAILED": "Import failed; inspect diagnostics.",
+            }.get(run.status, run.status)
+        )
     return data
 
 
@@ -64,13 +74,13 @@ async def enrich_jobs(db, jobs, config):
         )
         job["last"], job["last_success"] = run_record(latest), run_record(success)
         job["exchange"] = EXCHANGE_JOBS[name][2] if name in EXCHANGE_JOBS else None
-        job["configurable"] = name in EXCHANGE_JOBS
-        if name in EXCHANGE_JOBS:
+        job["configurable"] = name in SCHEDULED_JOBS
+        if name in SCHEDULED_JOBS:
             state = await schedule_state(db, name, config)
             job.update(state)
-            job["schedule"] = ", ".join(state["times"]) + " daily"
+            job["schedule"] = ", ".join(state["times"]) + " " + state["frequency"]
             job["next_run"] = (
-                next_slot(state["times"], m.now())
+                next_slot(state["times"], m.now(), state["frequency"], state["weekday"])
                 if config.market_scheduler_enabled
                 and config.market_scheduler_driver == "celery"
                 and not state["paused"]
@@ -79,8 +89,8 @@ async def enrich_jobs(db, jobs, config):
             )
             job["schedule_note"] = (
                 "Price imports check the exchange trading calendar."
-                if EXCHANGE_JOBS[name][1] == "prices"
-                else "Daily filing discovery; no new filings can be normal."
+                if SCHEDULED_JOBS[name][1] == "prices"
+                else "Runs wait in sequence if an earlier job has not finished."
             )
     return jobs
 
@@ -89,10 +99,10 @@ async def enrich_jobs(db, jobs, config):
 async def save_schedule(
     job: str, data: ScheduleInput, auth=Depends(admin), db=Depends(get_session)
 ):
-    if job not in EXCHANGE_JOBS:
+    if job not in SCHEDULED_JOBS:
         raise HTTPException(404, "This job does not support exchange schedules")
-    _, kind, exchange = EXCHANGE_JOBS[job]
-    if kind == "results" and len(data.times) != 1:
+    _, kind, exchange = SCHEDULED_JOBS[job]
+    if (kind != "prices" or data.frequency != "daily") and len(data.times) != 1:
         raise HTTPException(422, "Choose one daily discovery time per exchange")
     if len(set(data.times)) != len(data.times):
         raise HTTPException(422, "Schedule times must be unique")
@@ -100,8 +110,15 @@ async def save_schedule(
     if not control:
         control = m.SchedulerControl(name=job)
         db.add(control)
-    before = {"paused": control.paused, "times": control.schedule_times}
+    before = {
+        "paused": control.paused,
+        "times": control.schedule_times,
+        "frequency": control.frequency,
+        "weekday": control.weekday,
+    }
     control.paused = data.paused
+    control.frequency, control.weekday = data.frequency, data.weekday
+    control.schedule_times = sorted(data.times)
     if kind == "results":
         source = await db.get(m.ResultSource, exchange)
         if not source:
@@ -121,6 +138,32 @@ async def save_schedule(
     )
     await db.commit()
     return {"saved": True, **await schedule_state(db, job, await load_market_settings(db))}
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_queued(run_id: str, auth=Depends(admin), db=Depends(get_session)):
+    cancelled = await db.scalar(
+        update(m.ImportRun)
+        .where(m.ImportRun.id == run_id, m.ImportRun.status == "QUEUED")
+        .values(
+            status="CANCELLED",
+            error="Cancelled by administrator before execution",
+            finished_at=m.now(),
+        )
+        .returning(m.ImportRun.id)
+    )
+    if not cancelled:
+        raise HTTPException(409, "Only a queued run can be cancelled; refresh its status")
+    db.add(
+        m.Audit(
+            admin_id=auth[0].id,
+            action="market.run.cancel",
+            entity_id=run_id,
+            changes={"status": "CANCELLED"},
+        )
+    )
+    await db.commit()
+    return {"status": "CANCELLED"}
 
 
 @router.get("/runs")

@@ -21,6 +21,8 @@ export type ScheduledJob = {
   exchange: string | null;
   configurable: boolean;
   times?: string[];
+  frequency?: 'hourly' | 'daily' | 'weekly';
+  weekday?: number;
   next_run: string | null;
   last: JobRun | null;
   last_success: JobRun | null;

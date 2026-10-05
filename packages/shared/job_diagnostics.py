@@ -1,6 +1,7 @@
 """Safe, actionable operator guidance; never include credentials or raw responses."""
 
 GUIDANCE = {
+    "WAITING_FOR_PREVIOUS_JOB": "No action required. This job stays queued and retries automatically after the preceding job finishes.",
     "NOT_YET_PUBLISHED": "The dated file was not found. Check the exchange trading calendar and publication time, then retry that date or upload the official final file.",
     "SOURCE_ACCESS_BLOCKED": "The exchange denied access (403/406). Verify permitted source access; use an official-file upload if available. Repeated automatic retries will not fix access restrictions.",
     "BLOCKED_ADMIN_REQUIRED": "An earlier request was denied. Review exchange access before a manual retry.",

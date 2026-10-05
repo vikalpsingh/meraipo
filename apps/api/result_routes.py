@@ -57,6 +57,9 @@ async def configure(
         state = m.ResultSource(exchange=exchange)
         db.add(state)
     state.enabled, state.schedule = data.enabled, data.schedule
+    control = await db.get(m.SchedulerControl, f"sync-results-{exchange.lower()}")
+    if control:
+        control.schedule_times = [data.schedule]
     db.add(
         m.Audit(
             admin_id=auth[0].id,

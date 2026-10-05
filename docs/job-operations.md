@@ -1,54 +1,69 @@
-# MeraAdmin job operations
+# MeraAdmin scheduling and diagnostics
 
-`Data & scheduler` opens on five operational cards: IPO sync plus independent
-NSE/BSE closing-price and quarterly-results jobs. Source uploads, mapping review,
-provider configuration and legacy tools have separate views.
+The five primary jobs are configurable in **Data & scheduler → Jobs & schedules →
+Schedule & configuration**. Every job supports hourly, daily and weekly execution.
+All timing uses Asia/Kolkata (IST).
 
-## Scheduling
+The requested default daily sequence is:
 
-The Celery scheduler polls once per minute in Asia/Kolkata. Exchange identities are
-`sync-prices-nse`, `sync-prices-bse`, `sync-results-nse`, `sync-results-bse`.
-Price schedules support 1–6 daily HH:MM attempts per exchange. Results retain one
-daily discovery time per exchange, shared with the existing Results source form.
-Defaults remain 19:00/20:00/22:00 for prices and 19:30 for results. Existing source
-enablement, global enablement and inherited parent pauses are preserved.
+| Job | IST |
+| --- | --- |
+| NSE closing prices | 19:00 |
+| BSE closing prices | 20:00 |
+| NSE quarterly results | 21:00 |
+| BSE quarterly results | 22:00 |
+| IPO, subscription and GMP sync | 23:00 |
 
-Each due slot has a unique database key (job + IST minute), so duplicate scheduler
-notifications cannot create duplicate runs. Jobs due together are dispatched as a
-sequential chain because publication uses a shared database writer lock. Weekly
-results backfills also use separate exchange identities and respect source/pause
-settings. Older combined jobs remain readable in history and callable for legacy
-clients; Celery no longer schedules those combined price/results jobs.
+Hourly schedules choose a minute past every hour. Daily schedules choose HH:MM;
+price jobs may have additional explicit retry times. Weekly schedules choose a
+weekday and HH:MM. Next-run labels use the same calculation as the scheduler.
+Existing global/source enablement and paused preferences remain respected.
+The weekly results-history maintenance chain runs Monday at 00:00, one hour after
+the Sunday IPO sync, and uses the same queued exchange jobs.
 
-Configure `market_scheduler_driver=celery` to use these editable times. External
-Vercel cron timing is managed outside this UI and is explicitly labelled as such.
-A job that encounters an already-held writer lock records SKIPPED with the reason;
-a manual retry can run after the competing import completes.
+## Queue and failure behavior
 
-## Investigation flow
+Celery checks schedules every minute. A unique (job, IST minute) database key
+prevents duplicate scheduled runs. Due jobs are published as a sequential chain.
+The five primary job identities also enforce FIFO across independently queued
+manual runs and maintenance chains. The shared database writer lease prevents
+concurrent publication. If a predecessor or another writer is active, the run
+remains QUEUED with WAITING_FOR_PREVIOUS_JOB; Celery retries after 15 seconds without
+holding a worker process. It automatically starts when its turn arrives. A failed
+predecessor is terminal and does not block later jobs.
 
-1. Inspect latest attempt, last successful run, next run, duration and record counts.
-   Last success is queried independently of the latest 50 runs. A successful filing
-   scan with zero matches is distinguished from an import failure.
-2. Open **View runs & logs**. Filter by job and status; history is paginated.
-3. Inspect the run ID, timestamps, trigger, parameters, counters and its own errors.
-   Error details include source/record identifiers and next steps. Price files include
-   trading date, safe source URL, checksum, retry-after, row-error samples and CSV download.
-4. Correct source access/configuration or company mappings in the recovery views.
-   Retry a single exchange/date or bounded results range. Previously published data
-   remains available while a source is unavailable.
+Waiting jobs do not expire merely because the queue is long. A queued run can be
+cancelled from its diagnostics; an atomic QUEUED-to-RUNNING transition prevents a
+cancelled run being executed. Worker attempts stuck RUNNING for over 10 minutes
+are marked WORKER_TIMEOUT by the scheduler or overview. A broker delivery failure
+is recorded as FAILED. If a queued run was orphaned by a process crash before
+broker delivery, inspect worker health, cancel that queued run, and run it again.
 
-Endpoints require the existing administrator session; writes also require CSRF and
-same-origin checks. Schedule changes and source-setting writes create audit records.
-Diagnostics do not expose configured secrets or raw upstream response bodies.
-RUNNING attempts older than 10 minutes and QUEUED attempts older than 60 minutes are
-marked WORKER_TIMEOUT when the overview refreshes; this is crash visibility, not a
-worker heartbeat. Use the run ID to correlate worker logs before retrying.
+## Operator flow
 
-## Deployment and checks
+Cards show last attempt, last successful run, next run, duration and record counts.
+Last success is queried independently of the latest 50 runs. A filing scan with no
+new matching records is explicitly distinguished from an import failure.
 
-Apply `20261005_job_schedules`, then restart API, worker, scheduler and web together.
-Tests cover exchange parameter isolation, atomic slot claims, duplicate ticks,
-parent-pause inheritance, disabled sources, calendar/timezone timing, validation,
-authentication/CSRF, queue failures, filtered diagnostics and source-specific failures.
-Frontend tests cover each card's request target, schedule saves and log navigation.
+Open **View runs & logs** to filter paginated history and inspect the run ID,
+trigger, timestamps, parameters, counters and its own errors. Diagnostics identify
+the source/record and recovery steps. Closing files include the safe source URL,
+trading date, checksum, retry-after and a rejected-row CSV download.
+
+Source access, calendars, uploads and results review are in separate recovery
+views. Fix a source or identifier mapping, then retry just that exchange/date.
+Previously published data remains available during source failures. Historical
+combined-job runs are still readable; Celery no longer schedules combined jobs.
+
+Authentication and CSRF protect these endpoints. Schedule/source/cancel operations
+are audited. Diagnostics do not expose provider secrets or raw upstream bodies.
+Editable timing requires the Celery driver; external Vercel cron timing is managed
+separately and explicitly labelled in the UI.
+
+## Validation and deployment
+
+Apply migrations through `20261005_job_frequency`; restart API, worker, scheduler
+and web. Tests cover NSE/BSE isolation, duplicate schedule ticks, inherited pauses,
+disabled sources, hourly/daily/weekly rollover, permissions, FIFO waits and release,
+queue failures, cancellation, date imports and filtered run diagnostics. Frontend
+tests cover job request targets, frequency controls and selected-run errors.
