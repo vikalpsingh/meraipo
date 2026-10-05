@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { human, timestamp } from '@/lib/format';
 import type { Company } from '@/lib/types';
+import { ResultsConsole } from './results-console';
+import { BhavcopyConsole } from './bhavcopy-console';
 
 type Run = {
   id: string;
@@ -99,6 +101,8 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
 
   return (
     <section aria-labelledby="market-heading">
+      <BhavcopyConsole csrf={csrf} companies={companies} />
+      <ResultsConsole csrf={csrf} />
       <div className="section-heading">
         <div>
           <h2 id="market-heading">Data & scheduler</h2>

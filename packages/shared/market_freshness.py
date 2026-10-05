@@ -4,8 +4,8 @@ from packages.shared.calculations import utc
 
 SLOTS = {
     "sync-ipos": [(23, 0)],
-    "sync-prices": [(23, 10)],
-    "sync-results": [(21, 0)],
+    "sync-prices": [(19, 0), (20, 0), (22, 0)],
+    "sync-results": [(19, 30)],
     "collect-ipos": [(7, 0)],
     "publish-ipos": [(7, 15)],
     "collect-prices": [(18, 45)],
@@ -23,7 +23,7 @@ SLOTS = {
 def next_scheduled(job, at, holidays=()):
     for offset in range(15):
         day = at + timedelta(days=offset)
-        if job in ("collect-results", "publish-results", "sync-results") and day.weekday() != 4:
+        if job in ("collect-results", "publish-results") and day.weekday() != 4:
             continue
         if job in ("eod-prices", "collect-prices", "publish-prices") and (
             day.weekday() >= 5 or day.date().isoformat() in holidays

@@ -30,7 +30,9 @@ test('home is clear, missing GMP stays missing, navigation is small', async ({
   await expect(page.getByRole('heading', { name: 'IPOs at a glance.' })).toBeVisible();
 });
 test('tracker filters and company journey work', async ({ page }, testInfo) => {
-  await page.goto('/tracker?fy=&quarter=');
+  await page.goto('/tracker');
+  await expect(page.getByLabel('Financial year', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Listing quarter', { exact: true })).toHaveValue('');
   // Ten original listed fixtures plus two companies imported through the market pipeline.
   await expect(page.getByTestId('company-row')).toHaveCount(12);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -147,7 +149,7 @@ test('admin publishes an applicant guide and a visitor calculates, checks and do
   await page.getByLabel('Choose IPO', { exact: true }).selectOption(slug);
   await page.getByLabel('Applicant category', { exact: true }).fill('Retail individual');
   await page.getByLabel('Minimum lots', { exact: true }).fill('1');
-  await page.getByLabel('Category amount limit (₹, optional)', { exact: true }).fill('200000');
+  await page.getByLabel('Category amount limit (â‚¹, optional)', { exact: true }).fill('200000');
   await page.getByLabel('Expected allotment date', { exact: true }).fill(day(6));
   await page.getByLabel('Unblocking initiation date', { exact: true }).fill(day(7));
   await page.getByLabel('Bidding deadline (IST)', { exact: true }).fill(day(3) + 'T16:00');
@@ -176,21 +178,21 @@ test('admin publishes an applicant guide and a visitor calculates, checks and do
   await expect(
     page.getByText('Makes precision components for industrial customers.'),
   ).toBeVisible();
-  await page.getByRole('link', { name: '2 · Prepare to apply', exact: true }).click();
+  await page.getByRole('link', { name: '2 Â· Prepare to apply', exact: true }).click();
   await page.getByLabel('Number of lots', { exact: true }).fill('2');
-  await expect(page.getByText('₹15,000', { exact: true })).toBeVisible();
+  await expect(page.getByText('â‚¹15,000', { exact: true })).toBeVisible();
   await page.getByLabel('Number of lots', { exact: true }).fill('100');
   await expect(page.getByText(/This exceeds the published limit/)).toBeVisible();
   await page.getByLabel('Number of lots', { exact: true }).fill('2');
   await page.getByText('Before you finish applying', { exact: false }).click();
   await page.getByRole('checkbox').first().check();
   await expect(page.getByText('1/5', { exact: true })).toBeVisible();
-  await page.getByRole('link', { name: '3 · Track dates', exact: true }).click();
+  await page.getByRole('link', { name: '3 Â· Track dates', exact: true }).click();
   await expect(
-    page.getByRole('link', { name: 'Check allotment with Test Registrar ↗' }),
+    page.getByRole('link', { name: 'Check allotment with Test Registrar â†—' }),
   ).toHaveAttribute('href', 'https://example.com/allotment');
   const download = page.waitForEvent('download');
-  await page.getByRole('link', { name: 'Add dates to calendar ↓' }).click();
+  await page.getByRole('link', { name: 'Add dates to calendar â†“' }).click();
   expect((await download).suggestedFilename()).toBe(slug + '-ipo.ics');
   const calendar = await page.request.get('/ipo/' + slug + '/calendar');
   expect(calendar.headers()['content-type']).toContain('text/calendar');
@@ -232,7 +234,7 @@ test('visitors find companies, recover from empty search and follow section link
   await page.getByRole('dialog').getByRole('link', { name: 'View company journey' }).click();
   await page.getByRole('button', { name: 'Increase lots' }).click();
   await expect(page.getByLabel('Number of lots')).toHaveValue('2');
-  await page.getByRole('link', { name: 'Financial history ↓', exact: true }).click();
+  await page.getByRole('link', { name: 'Financial history â†“', exact: true }).click();
   await expect(page.locator('#financials')).toHaveAttribute('open', '');
   await page.goto('/ipo/prava-technologies#track');
   await expect(page.getByRole('heading', { name: 'Dates that matter' })).toBeVisible();

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func, select
@@ -130,9 +131,7 @@ def record(obj):
             else (
                 value.isoformat()
                 if isinstance(value, date)
-                else float(value)
-                if isinstance(value, Decimal)
-                else value
+                else float(value) if isinstance(value, Decimal) else value
             )
         )
         for column in obj.__table__.columns
@@ -142,6 +141,10 @@ def record(obj):
 
 
 async def catalog(db, today=None):
+    from packages.providers.bhavcopy import sources
+    from packages.shared.market_config import load_market_settings
+
+    closing_sources = sources((await load_market_settings(db)).bhavcopy_sources_json)
     today = today or m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
     query = (
         select(m.Company, m.Sector, m.IPO, m.IPODate, m.PriceSnapshot, m.ApplicantGuide)
@@ -189,6 +192,56 @@ async def catalog(db, today=None):
             "source_url": q.source_url,
             "verification_status": q.verification_status,
             "revision": q.revision,
+        }
+    # The tracker reads the same canonical validated results as Company Details.
+    # Monetary facts are INR in storage; the existing tracker contract is crore.
+    normalized = (
+        await db.execute(
+            select(m.FinancialResult, m.ResultFiling)
+            .join(m.ResultFiling, m.ResultFiling.id == m.FinancialResult.filing_id)
+            .where(
+                m.FinancialResult.company_id.in_(ids),
+                m.FinancialResult.current.is_(True),
+                m.FinancialResult.period_type == "QUARTERLY",
+            )
+            .order_by(m.FinancialResult.period_end)
+        )
+    ).all()
+    preferred = {}
+    for result_row, _ in normalized:
+        if result_row.basis == "CONSOLIDATED" or result_row.company_id not in preferred:
+            preferred[result_row.company_id] = result_row.basis
+    for result_row, filing in normalized:
+        if result_row.basis != preferred[result_row.company_id]:
+            continue
+        fy, quarter = financial_year(result_row.period_end), financial_quarter(
+            result_row.period_end
+        )
+        values = {key: None for key in METRICS}
+        for key in ("revenue", "pat", "total_income"):
+            value = result_row.facts.get(key)
+            values[key] = numeric(Decimal(value) / Decimal(10000000)) if value is not None else None
+        values["eps"] = numeric(result_row.facts.get("basic_eps"))
+        quarters.setdefault(result_row.company_id, {})[(fy, quarter)] = {
+            **values,
+            "statement_type": result_row.basis,
+            "source_provider": filing.exchange,
+            "source_timestamp": utc(filing.announced_at).isoformat(),
+            "fetched_at": utc(result_row.updated_at).isoformat(),
+            "financial_year": fy,
+            "quarter": quarter,
+            "label": f"Q{quarter} FY{str(fy)[-2:]}",
+            "source_url": (
+                filing.metadata_json.get("attachments") or [filing.metadata_json["source_url"]]
+            )[0],
+            "verification_status": "VERIFIED",
+            "revision": result_row.revision,
+        }
+    for company_id, basis in preferred.items():
+        quarters[company_id] = {
+            key: value
+            for key, value in quarters[company_id].items()
+            if value.get("statement_type") == basis
         }
     gmp_rows = (
         await db.scalars(select(m.GMP).where(m.GMP.ipo_id.in_(ipo_ids)).order_by(m.GMP.observed_at))
@@ -269,8 +322,11 @@ async def catalog(db, today=None):
     }
     result = []
     for company, sector, ipo, dates, price, guide in rows:
+        closing_exchange = price.closing_exchange if price else None
+        if closing_exchange and not closing_sources[closing_exchange].public_display_allowed:
+            price = None
         periods = quarters.get(company.id, {})
-        history = list(periods.values())
+        history = [periods[key] for key in sorted(periods)]
         for q in history:
             prior = periods.get((q["financial_year"] - 1, q["quarter"]), {})
             previous = periods.get(
@@ -315,6 +371,15 @@ async def catalog(db, today=None):
         cmp = numeric(price.cmp) if price else None
         drawdown = numeric(percent_change(cmp, price.ath if price else None))
         listing = dates.listing_date if dates else None
+        listing_price = None
+        if (
+            company.listing_price_date == listing
+            and company.listing_price_exchange
+            and closing_sources[company.listing_price_exchange].public_display_allowed
+        ):
+            listing_price = company.listing_price
+        elif company.is_demo:
+            listing_price = ipo.listing_price
         current_lifecycle = (
             lifecycle(ipo, dates, guide, today)
             if ipo.source_provider
@@ -359,7 +424,14 @@ async def catalog(db, today=None):
                 "price_low": numeric(ipo.price_low),
                 "price_high": numeric(ipo.price_high),
                 "issue_price": numeric(ipo.issue_price),
-                "listing_price": numeric(ipo.listing_price),
+                "listing_price": numeric(listing_price),
+                "listing_price_date": (
+                    listing.isoformat() if listing_price is not None and listing else None
+                ),
+                "listing_price_exchange": (
+                    company.listing_price_exchange if listing_price is not None else None
+                ),
+                "listing_gain": numeric(percent_change(listing_price, ipo.price_high)),
                 "lot_size": ipo.lot_size,
                 "applicant_guide": record(guide) if guide else None,
                 "provider_details": (
@@ -404,11 +476,17 @@ async def catalog(db, today=None):
                 ),
                 "cmp": cmp,
                 "price_date": price.price_date.isoformat() if price and price.price_date else None,
+                "closing_exchange": closing_exchange if price else None,
+                "daily_change_pct": (
+                    numeric(percent_change(price.cmp, price.previous_close))
+                    if price and price.previous_close
+                    else None
+                ),
                 "ath": numeric(price.ath) if price else None,
                 "high_52w": numeric(price.high_52w) if price else None,
                 "low_52w": numeric(price.low_52w) if price else None,
-                "return_ipo": numeric(percent_change(cmp, ipo.issue_price)),
-                "return_listing": numeric(percent_change(cmp, ipo.listing_price)),
+                "return_ipo": numeric(percent_change(cmp, ipo.price_high)),
+                "return_listing": numeric(percent_change(cmp, listing_price)),
                 "drawdown": drawdown,
                 "latest": latest,
                 "quarters": history,
@@ -419,12 +497,8 @@ async def catalog(db, today=None):
                     if drawdown is not None and drawdown <= -20
                     else (
                         " / Price up"
-                        if cmp is not None
-                        and ipo.issue_price is not None
-                        and cmp >= ipo.issue_price
-                        else " / Price down"
-                        if cmp is not None
-                        else " / Price pending"
+                        if cmp is not None and ipo.price_high is not None and cmp >= ipo.price_high
+                        else " / Price down" if cmp is not None else " / Price pending"
                     )
                 ),
                 "valuation": record(valuation) if valuation else None,
@@ -513,6 +587,29 @@ async def journey(db, slug):
             )
         ).all()
     ]
+    closing_snapshot = await db.scalar(
+        select(m.PriceSnapshot).where(m.PriceSnapshot.company_id == company["id"])
+    )
+    if closing_snapshot and closing_snapshot.closing_exchange:
+        # New bhavcopy histories are always one exchange; do not combine legacy or intraday data.
+        company["prices"] = (
+            [
+                {**record(p), "price_date": p.trade_date.isoformat()}
+                for p in (
+                    await db.scalars(
+                        select(m.DailyClose)
+                        .where(
+                            m.DailyClose.company_id == company["id"],
+                            m.DailyClose.exchange == company["closing_exchange"],
+                        )
+                        .order_by(m.DailyClose.trade_date)
+                    )
+                ).all()
+            ]
+            if company.get("closing_exchange")
+            else []
+        )
+        company["prices_adjusted"] = False
     company["sources"] = [
         record(p)
         for p in (
@@ -555,4 +652,7 @@ async def journey(db, slug):
             company["performance"][label] = (
                 numeric(percent_change(company["cmp"], earlier[-1]["close"])) if earlier else None
             )
+    from apps.worker.results import public_results
+
+    company["financial_performance"] = await public_results(db, company["id"])
     return company

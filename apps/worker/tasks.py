@@ -29,8 +29,8 @@ celery.conf.update(
         name: {"task": "meraipo.scheduled_market", "schedule": schedule, "args": [name]}
         for name, schedule in {
             "sync-ipos": crontab(hour=23, minute=0),
-            "sync-prices": crontab(hour=23, minute=10),
-            "sync-results": crontab(hour=21, minute=0, day_of_week="5"),
+            "sync-prices": crontab(hour="19,20,22", minute=0),
+            "sync-results": crontab(minute="*"),
         }.items()
     },
 )
@@ -123,8 +123,35 @@ def scheduled_market(job):
                     or job not in PIPELINE_JOBS
                 ):
                     return {"status": "DISABLED"}
+                if job == "sync-results":
+                    from zoneinfo import ZoneInfo
+
+                    from packages.database import models as m
+
+                    local = datetime.now(ZoneInfo("Asia/Kolkata"))
+                    sources = (await db.scalars(select(m.ResultSource))).all()
+                    due = [
+                        s.exchange
+                        for s in sources
+                        if s.enabled and s.schedule == local.strftime("%H:%M")
+                    ]
+                    if not sources and local.strftime("%H:%M") == "19:30":
+                        due = ["BSE", "NSE"]
+                    if not due:
+                        return {"status": "NOT_DUE"}
+                    prior = await db.scalar(
+                        select(ImportRun.id).where(
+                            ImportRun.job_name == job,
+                            ImportRun.trigger == "scheduled",
+                            ImportRun.created_at >= local.replace(second=0, microsecond=0),
+                        )
+                    )
+                    if prior:
+                        return {"status": "ALREADY_QUEUED"}
                 async with market_settings_context(db):
-                    run = await create_run(db, job, "scheduled")
+                    run = await create_run(
+                        db, job, "scheduled", {"exchanges": due} if job == "sync-results" else None
+                    )
                     try:
                         market_job.delay(run.id)
                     except Exception:
@@ -136,3 +163,65 @@ def scheduled_market(job):
             await engine.dispose()
 
     return asyncio.run(dispatch())
+
+
+celery.conf.beat_schedule["results-weekly-history"] = {
+    "task": "meraipo.results_history",
+    "schedule": crontab(hour=20, minute=30, day_of_week="0"),
+}
+
+
+@celery.task(name="meraipo.results_history")
+def results_history():
+    """Sequential company backfills share the normal job lease and failure isolation."""
+    from datetime import timedelta
+
+    from celery import chain
+
+    from apps.worker.market import create_run, india_today
+    from packages.database import models as m
+
+    async def queue():
+        try:
+            async with Session() as db:
+                runtime = await load_market_settings(db)
+                if (
+                    not runtime.market_scheduler_enabled
+                    or runtime.market_scheduler_driver != "celery"
+                ):
+                    return {"status": "DISABLED"}
+                companies = (
+                    await db.scalars(
+                        select(m.Company)
+                        .join(m.Identifier)
+                        .join(m.IPO)
+                        .where(
+                            m.Company.is_demo.is_(False),
+                            m.Identifier.exchange.in_(["NSE", "BSE"]),
+                            m.IPO.status == "LISTED",
+                        )
+                        .distinct()
+                    )
+                ).all()
+                jobs = []
+                today = india_today()
+                for company in companies:
+                    run = await create_run(
+                        db,
+                        "sync-results",
+                        "reconciliation",
+                        {
+                            "company_id": company.id,
+                            "from": (today - timedelta(days=1461)).isoformat(),
+                            "to": today.isoformat(),
+                            "history": True,
+                        },
+                    )
+                    jobs.append(market_job.si(run.id))
+                if jobs:
+                    chain(*jobs).apply_async()
+                return {"queued": len(jobs)}
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(queue())

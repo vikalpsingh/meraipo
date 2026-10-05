@@ -48,6 +48,8 @@ services:
       MARKET_FEEDS_JSON: ${MARKET_FEEDS_JSON:-}
       TRADING_CALENDAR_YEAR: ${TRADING_CALENDAR_YEAR:-0}
       TRADING_HOLIDAYS: ${TRADING_HOLIDAYS:-}
+      BHAVCOPY_SOURCES_JSON: ${BHAVCOPY_SOURCES_JSON:-{}}
+      BHAVCOPY_STORAGE_PATH: /app/work/bhavcopies
       SESSION_HOURS: ${SESSION_HOURS:-8}
       CACHE_TTL: ${CACHE_TTL:-60}
       GMP_TTL_HOURS: ${GMP_TTL_HOURS:-12}
@@ -70,7 +72,7 @@ services:
       dockerfile: infrastructure/Dockerfile.api
     environment: *backend
     ports: ["127.0.0.1:8000:8000"]
-    volumes: ["documents:/app/work/documents"]
+    volumes: ["documents:/app/work/documents", "bhavcopies:/app/work/bhavcopies"]
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
@@ -84,6 +86,7 @@ services:
       context: .
       dockerfile: infrastructure/Dockerfile.api
     environment: *backend
+    volumes: ["bhavcopies:/app/work/bhavcopies"]
     command: ["celery", "-A", "apps.worker.tasks.celery", "worker", "--loglevel=INFO", "--concurrency=2"]
     depends_on:
       migrate: {condition: service_completed_successfully}
@@ -129,3 +132,4 @@ volumes:
   redis_data:
   documents:
   scheduler_data:
+  bhavcopies:

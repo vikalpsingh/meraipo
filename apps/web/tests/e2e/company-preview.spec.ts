@@ -9,6 +9,19 @@ test('company popup has subscription percentages, history and keyboard close', a
     (c: { subscription?: { multiple: number } }) => c.subscription?.multiple === 3.75,
   );
   await page.goto('/');
+  const headers = page.locator('#open .ipo-interest-table th');
+  await expect(headers.nth(2)).toHaveText('Issue size (₹ crore)');
+  const issueRow = page
+    .locator('#open .ipo-interest-table tbody tr')
+    .filter({
+      has: page.getByRole('button', { name: company.name, exact: true, includeHidden: true }),
+    });
+  const size =
+    company.issue_size == null
+      ? '—'
+      : new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(company.issue_size);
+  await expect(issueRow.locator(':scope > td').nth(2)).toHaveText(size);
+
   if (testInfo.project.name === 'desktop') {
     await expect(
       page.locator('#open').getByRole('columnheader', { name: 'Security type', exact: true }),

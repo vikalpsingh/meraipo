@@ -8,7 +8,7 @@ COPY apps/__init__.py apps/__init__.py
 COPY apps/api apps/api
 COPY apps/worker apps/worker
 COPY packages packages
-RUN pip install --no-deps . && useradd --create-home appuser && mkdir -p work/documents && chown -R appuser:appuser /app/work
+RUN pip install --no-deps . && useradd --create-home appuser && mkdir -p work/documents work/bhavcopies && chown -R appuser:appuser /app/work
 USER appuser
 EXPOSE 8000
 CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

@@ -420,23 +420,25 @@ async def test_same_job_stages_then_populates_public_master(db, monkeypatch):
     assert run.counters["written"] == 0
 
 
-async def test_single_price_job_collects_both_exchanges_and_populates_ui(db, monkeypatch):
+async def test_single_price_job_collects_both_exchanges_and_populates_ui(db, monkeypatch, tmp_path):
+    from tests.test_bhavcopy import CSV as UDIFF
+    from tests.test_bhavcopy import config
+
     await tracked(db, "LISTED")
-    monkeypatch.setattr(settings(), "exchange_direct_enabled", True)
-    monkeypatch.setattr(settings(), "trading_calendar_year", DAY.year)
-    monkeypatch.setattr("apps.worker.exchange_pipeline.india_today", lambda: DAY)
+    config(monkeypatch, tmp_path, public_display_allowed=True)
+    monkeypatch.setattr("apps.worker.market.india_today", lambda: DAY)
     seen = []
 
     async def download(url):
         seen.append(url)
-        return CSV
+        return UDIFF.replace(b"NSE", b"BSE") if "bseindia" in url else UDIFF
 
     run = await create_run(db, "sync-prices", "manual")
     await run_pipeline(db, run, download)
     assert run.status == "SUCCESS", run.error
     assert len(seen) == 2
     assert (await journey(db, "real-fixture"))["cmp"] == 125
-    assert await db.scalar(select(func.count()).select_from(m.ExchangePrice)) == 2
+    assert await db.scalar(select(func.count()).select_from(m.DailyClose)) == 2
 
 
 def test_bse_cumulative_categories_and_schema_guard():

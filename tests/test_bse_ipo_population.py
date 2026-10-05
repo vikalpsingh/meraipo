@@ -130,7 +130,11 @@ async def test_bse_failure_logged_while_nse_still_publishes(db, monkeypatch):
     run = await create_run(db, "sync-ipos", "manual")
     await run_pipeline(db, run, download)
     assert run.status == "PARTIAL" and run.counters["written"] == 2
-    error = await db.scalar(select(m.JobError).where(m.JobError.run_id == run.id))
+    error = await db.scalar(
+        select(m.JobError).where(
+            m.JobError.run_id == run.id, m.JobError.code == "BSE_ACCESS_REDIRECT"
+        )
+    )
     assert error.provider == "BSE" and error.code == "BSE_ACCESS_REDIRECT"
     assert BSE_LIST_URL in error.item and "permitted API access" in error.detail
 
@@ -148,7 +152,11 @@ async def test_unverified_cross_exchange_match_is_rejected_not_duplicated(db, mo
     run = await create_run(db, "sync-ipos", "manual")
     await run_pipeline(db, run, download)
     assert run.status == "PARTIAL"
-    error = await db.scalar(select(m.JobError).where(m.JobError.run_id == run.id))
+    error = await db.scalar(
+        select(m.JobError).where(
+            m.JobError.run_id == run.id, m.JobError.code == "BSE_CROSS_EXCHANGE_MAPPING_REQUIRED"
+        )
+    )
     assert "90001" in error.item and "Example Industries" in error.item
     assert (
         await db.scalar(

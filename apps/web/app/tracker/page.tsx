@@ -2,9 +2,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { features } from '@/lib/features';
 import { api } from '@/lib/api';
-import { money, percent, date, human, fiscalToday } from '@/lib/format';
+import { human, fiscalToday } from '@/lib/format';
 import type { TrackerResult, Advertisement } from '@/lib/types';
-import { Trust, Ads } from '@/components/content';
+import { Ads } from '@/components/content';
+import { TrackerTable } from '@/components/tracker-table';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'IPO Tracker', alternates: { canonical: '/tracker' } };
 const views = [
@@ -26,8 +27,6 @@ export default async function Tracker({
   const today = fiscalToday();
   const query = new URLSearchParams();
   for (const [k, v] of Object.entries(input)) if (v !== undefined) query.set(k, v);
-  if (input.fy === undefined) query.set('fy', String(today.fy));
-  if (input.quarter === undefined) query.set('quarter', String(today.quarter));
   const apiQuery = new URLSearchParams([...query].filter(([, value]) => value !== ''));
   const [data, ads] = await Promise.all([
     api<TrackerResult>('/tracker?' + apiQuery),
@@ -168,82 +167,7 @@ export default async function Tracker({
         </details>
       </form>
       {data.items.length ? (
-        <div className="panel table-panel">
-          <div
-            className="table-scroll"
-            tabIndex={0}
-            role="region"
-            aria-label="IPO performance table"
-          >
-            <table className="data-table tracker-table">
-              <thead>
-                <tr>
-                  {[
-                    'Company',
-                    'IPO / listing price',
-                    'CMP / IPO return',
-                    'Business trend',
-                    'Latest quarter',
-                    'Revenue YoY',
-                    'PAT YoY',
-                    'EBITDA margin',
-                    'ROCE',
-                    'From ATH',
-                    'Valuation',
-                    'Data',
-                  ].map((h) => (
-                    <th key={h} scope="col">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((c) => (
-                  <tr key={c.id} data-testid="company-row">
-                    <th scope="row">
-                      <Link href={'/ipo/' + c.slug}>{c.name} ↗</Link>
-                      <small>
-                        {c.board} · {date(c.listing_date)}
-                      </small>
-                    </th>
-                    <td>
-                      {money(c.issue_price)}
-                      <small>Listed {money(c.listing_price)}</small>
-                    </td>
-                    <td>
-                      <b>{money(c.cmp)}</b>
-                      <small
-                        className={
-                          c.return_ipo !== null && c.return_ipo < 0 ? 'negative' : 'positive'
-                        }
-                      >
-                        {percent(c.return_ipo)} since IPO
-                      </small>
-                      <small>{percent(c.return_listing)} since listing</small>
-                    </td>
-                    <td>
-                      <span className="trend-label">{human(c.trend.state)}</span>
-                    </td>
-                    <td>{c.latest.label || 'Data pending'}</td>
-                    <td>{percent(c.latest.revenue_yoy)}</td>
-                    <td>{percent(c.latest.pat_yoy)}</td>
-                    <td>{percent(c.latest.margin)}</td>
-                    <td>{percent(c.latest.roce)}</td>
-                    <td>{percent(c.drawdown)}</td>
-                    <td>
-                      {c.valuation_label}
-                      <small>P/E {c.valuation?.pe ?? '—'}</small>
-                    </td>
-                    <td>
-                      <Trust company={c} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <TrackerTable companies={data.items} />
       ) : (
         <section className="panel empty">
           <h2>No companies match these filters.</h2>

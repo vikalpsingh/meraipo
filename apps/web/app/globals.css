@@ -523,6 +523,18 @@ footer > span {
   flex-direction: column;
   gap: 6px;
 }
+.bhavcopy-console form {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.bhavcopy-console details {
+  margin-top: 16px;
+}
+.bhavcopy-console input,
+.bhavcopy-console select {
+  min-width: 0;
+}
 .form-grid input,
 .form-grid select,
 .form-grid textarea {
@@ -1417,26 +1429,8 @@ input[type='checkbox'] {
     color: #647782;
     margin-bottom: 5px;
   }
-  .tracker-table td:nth-child(2)::before {
-    content: 'IPO / listing price';
-  }
-  .tracker-table td:nth-child(3)::before {
-    content: 'CMP / return';
-  }
-  .tracker-table td:nth-child(4)::before {
-    content: 'Business trend';
-  }
-  .tracker-table td:nth-child(5)::before {
-    content: 'Latest quarter';
-  }
-  .tracker-table td:nth-child(6)::before {
-    content: 'Revenue YoY';
-  }
-  .tracker-table td:nth-child(7)::before {
-    content: 'PAT YoY';
-  }
-  .tracker-table td:nth-child(n + 8):nth-child(-n + 11) {
-    display: none;
+  .tracker-table td::before {
+    content: attr(data-label);
   }
   .tracker-table td:last-child {
     grid-column: 1/-1;

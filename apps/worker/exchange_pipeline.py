@@ -29,8 +29,8 @@ from packages.shared.config import settings
 
 PIPELINE_JOBS = {
     "sync-ipos": ("IPO, subscription & GMP sync", "23:00 daily", ["ipos", "subscriptions", "gmp"]),
-    "sync-prices": ("Daily closing price sync", "23:10 daily; latest trading day", ["prices"]),
-    "sync-results": ("Quarterly result sync", "21:00 Friday", ["results"]),
+    "sync-prices": ("Daily closing price sync", "19:00 daily; retries 20:00 and 22:00", ["prices"]),
+    "sync-results": ("Quarterly result sync", "19:30 daily (configurable)", ["results"]),
     "collect-ipos": (
         "Collect IPOs & subscriptions",
         "07:00 daily",
@@ -166,9 +166,7 @@ async def store_batch(db, run, provider, authority, url, raw, records, errors, c
                 record_authority = (
                     "UNOFFICIAL"
                     if kind == "gmp"
-                    else "BSE"
-                    if provider == "NSE" and value.get("bse_symbol")
-                    else authority
+                    else "BSE" if provider == "NSE" and value.get("bse_symbol") else authority
                 )
                 changed = await stage(db, kind, value, provider, record_authority, payload.id)
                 counts["written" if changed else "unchanged"] += 1
@@ -658,7 +656,12 @@ async def publish(db, run, counts):
     return None if rows else "NO_PENDING_RECORDS"
 
 
-async def run_pipeline(db, run, download=ex.download):
+async def run_pipeline(db, run, download=None):
+    if download is None:
+        if run.job_name == "sync-prices":
+            from packages.providers.bhavcopy import download
+        else:
+            download = ex.download
     if run.status != "QUEUED":
         return run
     if not await acquire(db, run.id):
@@ -673,6 +676,21 @@ async def run_pipeline(db, run, download=ex.download):
         control = await db.get(m.SchedulerControl, run.job_name)
         if control and control.paused:
             note = "PAUSED"
+        elif run.job_name == "sync-prices":
+            from apps.worker.bhavcopy import sync
+
+            note = await sync(db, run, counts, download=download)
+        elif (
+            run.job_name == "sync-results"
+            and not any(
+                source.kind == "results"
+                for source in ex.discovery_sources(settings().exchange_sources_json)
+            )
+            and not configuration(settings().market_feeds_json).get("results")
+        ):
+            from apps.worker.results import sync
+
+            note = await sync(db, run, counts)
         elif run.job_name.startswith("sync-"):
             note = await collect(db, run, counts, download)
             # Durable staging survives a later publishing failure; the same worker retains the lease.
@@ -694,9 +712,7 @@ async def run_pipeline(db, run, download=ex.download):
         run.status = (
             ("PARTIAL" if counts["providers"] else "FAILED")
             if counts["failed"]
-            else "SUCCESS"
-            if counts["providers"]
-            else "SKIPPED"
+            else "SUCCESS" if counts["providers"] else "SKIPPED"
         )
         run.error = note
     except Exception as exc:
@@ -707,6 +723,7 @@ async def run_pipeline(db, run, download=ex.download):
             "Pipeline failed; check source configuration and worker logs",
         )
         counts["written"] = 0
+        counts["failed"] += 1
         error(db, run, "pipeline", run.job_name, exc)
     run.counters, run.finished_at = counts, m.now()
     await db.execute(delete(m.JobLock).where(m.JobLock.owner == run.id))

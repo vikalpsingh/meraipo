@@ -69,6 +69,10 @@ const pages: Record<string, { title: string; intro: string; sections: [string, s
       'MeraIPO provides IPO, market and company information for research and educational purposes. It does not guarantee IPO allotment, listing gains or investment returns.',
     sections: [
       [
+        'Market data disclaimer',
+        'Market prices are populated from the latest available BSE and NSE data feeds. These are not live quotes; refer to the displayed price date.',
+      ],
+      [
         'Grey-market information',
         'Unofficial grey-market information. GMP does not guarantee listing price or investment return.',
       ],

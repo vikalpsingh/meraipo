@@ -4,7 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { CompanyPreview } from './company-preview';
 import type { SiteMessage, Advertisement, Company } from '@/lib/types';
-import { money, percent, date, timestamp, human } from '@/lib/format';
+import { money, number, percent, date, timestamp, human } from '@/lib/format';
 export function Message({ message }: { message: SiteMessage | null }) {
   if (!message) return null;
   return (
@@ -93,6 +93,10 @@ export function IPOCard({ company: c, today = indiaDay() }: { company: Company; 
       </p>
       <dl>
         <div>
+          <dt title="Total offer value in ₹ crore">Issue size (₹ crore)</dt>
+          <dd>{c.issue_size == null ? 'To be announced' : number(c.issue_size)}</dd>
+        </div>
+        <div>
           <dt>Price band</dt>
           <dd>
             {c.price_low === null || c.price_high === null
@@ -117,10 +121,6 @@ export function IPOCard({ company: c, today = indiaDay() }: { company: Company; 
         <div>
           <dt>Lot size</dt>
           <dd>{c.lot_size === null ? 'To be announced' : `${c.lot_size} shares`}</dd>
-        </div>
-        <div>
-          <dt>Issue size</dt>
-          <dd>{c.issue_size === null ? 'To be announced' : `${money(c.issue_size)} Cr`}</dd>
         </div>
       </dl>
       <div className="gmp">

@@ -55,7 +55,7 @@ def test_daily_price_schedule_includes_weekend():
     from packages.shared.market_freshness import next_scheduled
 
     at = datetime(2026, 7, 25, 10, tzinfo=ZoneInfo("Asia/Kolkata"))
-    assert next_scheduled("sync-prices", at).startswith("2026-07-25T23:10")
+    assert next_scheduled("sync-prices", at).startswith("2026-07-25T19:00")
 
 
 @pytest.mark.parametrize("value", [0, -2.5, 13.5])
@@ -124,32 +124,39 @@ async def test_invalid_gmp_does_not_drop_ipo():
     assert batches[0].errors == [("gmp:fixture-123", "IPOALERTS_INVALID_GMP")]
 
 
-async def test_holiday_job_populates_last_trading_date_and_is_idempotent(db, monkeypatch):
+async def test_holiday_job_skips_and_explicit_backfill_is_idempotent(db, monkeypatch, tmp_path):
+    from tests.test_bhavcopy import CSV as UDIFF
+    from tests.test_bhavcopy import config
+
     await tracked(db, "LISTED")
-    monkeypatch.setattr(settings(), "exchange_direct_enabled", True)
-    monkeypatch.setattr(settings(), "trading_calendar_year", DAY.year)
-    monkeypatch.setattr(settings(), "trading_holidays", "2026-07-21")
-    monkeypatch.setattr("apps.worker.exchange_pipeline.india_today", lambda: date(2026, 7, 21))
+    config(monkeypatch, tmp_path, holidays=["2026-07-21"], public_display_allowed=True)
+    monkeypatch.setattr("apps.worker.market.india_today", lambda: date(2026, 7, 21))
     seen = []
 
     async def download(url):
         seen.append(url)
         assert f"{DAY:%Y%m%d}" in url
-        return CSV
+        return UDIFF.replace(b"NSE", b"BSE") if "bseindia" in url else UDIFF
+
+    holiday = await create_run(db, "sync-prices", "scheduled")
+    await run_pipeline(db, holiday, download)
+    assert holiday.status == "SKIPPED" and not seen
 
     for _ in range(2):
-        run = await create_run(db, "sync-prices", "manual")
+        run = await create_run(db, "sync-prices", "manual", {"trade_date": DAY.isoformat()})
         await run_pipeline(db, run, download)
         assert run.status == "SUCCESS", run.error
-        assert run.parameters["resolved_trade_date"] == DAY.isoformat()
+        assert run.parameters["trade_date"] == DAY.isoformat()
     public = await journey(db, "real-fixture")
     assert public["cmp"] == 125
     assert str(public["price_date"]) == DAY.isoformat()
     assert (
         await db.scalar(
-            select(func.count()).select_from(m.Price).where(m.Price.company_id == public["id"])
+            select(func.count())
+            .select_from(m.DailyClose)
+            .where(m.DailyClose.company_id == public["id"])
         )
-        == 1
+        == 2
     )
     assert len(seen) == 4
 

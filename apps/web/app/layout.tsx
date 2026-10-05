@@ -59,6 +59,11 @@ export default async function Layout({ children }: { children: React.ReactNode }
             </nav>
           </div>
           <p>
+            <strong>Market data disclaimer:</strong> Market prices are populated from the latest
+            available BSE and NSE data feeds. These are not live quotes; refer to the displayed
+            price date.
+          </p>
+          <p>
             MeraIPO provides IPO, market and company information for research and educational
             purposes. It does not guarantee IPO allotment, listing gains or investment returns.
           </p>

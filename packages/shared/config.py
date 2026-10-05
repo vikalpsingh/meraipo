@@ -33,12 +33,14 @@ class Settings(BaseSettings):
     market_feeds_json: str = "{}"
     trading_holidays: str = ""
     trading_calendar_year: int = 0
+    bhavcopy_sources_json: str = "{}"
+    bhavcopy_storage_path: str = "./work/bhavcopies"
     market_scheduler_enabled: bool = False
     exchange_direct_enabled: bool = False
     nse_subscription_categories_enabled: bool = True
     ipo_data_provider: Literal["exchange", "ipoalerts", "feed"] = "exchange"
     ipoalerts_api_key: SecretStr = SecretStr("")
-    ipoalerts_page_size: int = Field(3, ge=1, le=100)
+    ipoalerts_page_size: int = Field(default=3, ge=1, le=100)
     exchange_sources_json: str = "[]"
     bse_ipo_issues_json: str = "[]"
     market_scheduler_driver: Literal["celery", "vercel"] = "celery"

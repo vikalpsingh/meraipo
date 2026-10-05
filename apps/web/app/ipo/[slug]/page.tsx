@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { money, number, percent, date, timestamp, human } from '@/lib/format';
 import type { Company, Quarter } from '@/lib/types';
+import { FinancialPerformance } from '@/components/financial-performance';
 import { Trust } from '@/components/content';
 import { ApplicantGuide } from '@/components/applicant-guide';
 import { LiveMarketData, AnnualHistory } from '@/components/market-data';
@@ -103,6 +104,7 @@ export default async function Journey({
         </div>
         <Trust company={c} />
       </div>
+      {c.financial_performance && <FinancialPerformance data={c.financial_performance} />}
       {c.status === 'LISTED' ? (
         <details className="panel" suppressHydrationWarning>
           <summary>Original IPO guide & application dates</summary>

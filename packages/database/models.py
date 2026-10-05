@@ -75,6 +75,9 @@ class Company(Entity, Base):
         String(20), default="GENERAL", server_default="GENERAL"
     )
     isin: Mapped[str | None] = mapped_column(String(12), unique=True)
+    listing_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    listing_price_date: Mapped[date | None] = mapped_column(Date)
+    listing_price_exchange: Mapped[str | None] = mapped_column(String(3))
 
 
 class Identifier(Entity, Base):
@@ -338,6 +341,53 @@ class PriceSnapshot(Entity, Base):
     high_52w: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     low_52w: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     price_date: Mapped[date | None] = mapped_column(Date)
+    closing_exchange: Mapped[str | None] = mapped_column(String(3))
+    previous_close: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+
+
+class BhavcopyFile(Entity, Base):
+    __tablename__ = "bhavcopy_files"
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("data_import_runs.id"))
+    exchange: Mapped[str] = mapped_column(String(3))
+    trade_date: Mapped[date] = mapped_column(Date)
+    source_url: Mapped[str] = mapped_column(Text)
+    checksum: Mapped[str | None] = mapped_column(String(64))
+    path: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50))
+    error: Mapped[str | None] = mapped_column(Text)
+    counters: Mapped[dict | None] = mapped_column(JSON)
+    errors: Mapped[list | None] = mapped_column(JSON)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_bhavcopy_session", "exchange", "trade_date", "created_at"),)
+
+
+class DailyClose(Entity, Base):
+    __tablename__ = "equity_daily_closes"
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"))
+    exchange: Mapped[str] = mapped_column(String(3))
+    trade_date: Mapped[date] = mapped_column(Date)
+    close: Mapped[Decimal] = mapped_column(Numeric(20, 4))
+    open: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    high: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    low: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    previous_close: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    volume: Mapped[Decimal | None] = mapped_column(Numeric(24, 0))
+    file_id: Mapped[str] = mapped_column(ForeignKey("bhavcopy_files.id"))
+    security_id: Mapped[str] = mapped_column(String(40))
+    isin: Mapped[str] = mapped_column(String(12))
+    series: Mapped[str] = mapped_column(String(10))
+    __table_args__ = (
+        UniqueConstraint("company_id", "exchange", "trade_date", name="uq_equity_close"),
+    )
+
+
+class DailyCloseRevision(Entity, Base):
+    __tablename__ = "equity_close_revisions"
+    close_id: Mapped[str] = mapped_column(ForeignKey("equity_daily_closes.id"), index=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("bhavcopy_files.id"))
+    values: Mapped[dict] = mapped_column(JSON)
 
 
 class Peer(Entity, Base):
@@ -512,3 +562,68 @@ class ClickDaily(Base):
     day: Mapped[date] = mapped_column(Date, primary_key=True)
     section: Mapped[str] = mapped_column(String(20), primary_key=True)
     clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ResultSource(Base):
+    __tablename__ = "result_sources"
+    exchange: Mapped[str] = mapped_column(String(3), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    schedule: Mapped[str] = mapped_column(String(5), default="19:30")
+    status: Mapped[str] = mapped_column(String(80), default="NOT_YET_RUN")
+    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ResultHistory(Base):
+    __tablename__ = "result_history_checkpoints"
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), primary_key=True)
+    exchange: Mapped[str] = mapped_column(String(3), primary_key=True)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    from_date: Mapped[date] = mapped_column(Date)
+    to_date: Mapped[date] = mapped_column(Date)
+
+
+class ResultFiling(Entity, Base):
+    __tablename__ = "result_filings"
+    exchange: Mapped[str] = mapped_column(String(3), index=True)
+    identity: Mapped[str] = mapped_column(String(64), unique=True)
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("companies.id"), index=True)
+    identifier: Mapped[str] = mapped_column(String(40))
+    announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_json: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(80), default="AWAITING_PROCESSING")
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ResultAttachment(Entity, Base):
+    __tablename__ = "result_attachments"
+    filing_id: Mapped[str] = mapped_column(ForeignKey("result_filings.id"), index=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    checksum: Mapped[str] = mapped_column(String(64))
+    content_type: Mapped[str] = mapped_column(String(80))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    parser_version: Mapped[str] = mapped_column(String(40))
+    __table_args__ = (UniqueConstraint("filing_id", "checksum"),)
+
+
+class FinancialResult(Entity, Base):
+    __tablename__ = "financial_results"
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), index=True)
+    filing_id: Mapped[str] = mapped_column(ForeignKey("result_filings.id"))
+    period_start: Mapped[date] = mapped_column(Date)
+    period_end: Mapped[date] = mapped_column(Date)
+    period_type: Mapped[str] = mapped_column(String(20))
+    basis: Mapped[str] = mapped_column(String(20))
+    revision: Mapped[int] = mapped_column(Integer)
+    current: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Decimal strings in INR retain precision; EPS is INR/share. No binary floats.
+    facts: Mapped[dict] = mapped_column(JSON)
+    provenance: Mapped[list] = mapped_column(JSON)
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "period_start", "period_end", "period_type", "basis", "revision"
+        ),
+    )

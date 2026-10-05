@@ -7,10 +7,10 @@ Each scheduled job downloads into durable staging and then publishes validated r
 | Job | Time IST |
 | --- | --- |
 | `sync-ipos` — IPO, subscription and configured unofficial GMP | Daily 23:00 |
-| `sync-prices` — daily NSE/BSE closing prices | Trading weekdays 23:10 |
+| `sync-prices` — daily NSE/BSE closing prices | Daily 19:00; retries 20:00 and 22:00; per-exchange calendars |
 | `sync-results` — quarterly and annual financial filings | Friday 21:00 |
 
-23:00 supersedes the earlier 01:00 request. The price offset avoids overlapping writers; results retain the requested Friday 21:00 timing. Standalone collect/publish jobs remain available under advanced admin tools for troubleshooting.
+The current closing-price implementation is documented in [Daily closing files](bhavcopy.md): persistent originals with seven-day retention, numeric exchange-specific history, corrections, manual uploads and public-display permissions. It supersedes the earlier price staging/fallback design described below. The shared writer lease prevents overlapping imports. Standalone collect/publish jobs remain available under advanced admin tools for troubleshooting.
 
 ## Architecture
 

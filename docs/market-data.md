@@ -70,6 +70,10 @@ Multiple configured exchange sources are visited NSE first, then BSE, then provi
 
 ## F. Schedules
 
+The daily exchange closing-price job now uses `sync-prices` at **19:00, 20:00 and
+22:00 Asia/Kolkata** (UTC `30 13,14,16 * * *`). See [Daily closing files](bhavcopy.md).
+The table below describes legacy/manual feed jobs, not the active exchange-price schedule.
+
 | Job | UTC cron | IST |
 |---|---|---|
 | IPO master | `30 1 * * *` | 07:00 daily |

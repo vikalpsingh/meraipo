@@ -177,6 +177,7 @@ class LoginInput(Input):
 
 
 class MarketConfigurationInput(Input):
+    bhavcopy_sources_json: str = Field(default="{}", max_length=30000)
     provider_mode: Literal["manual", "market-feeds"]
     market_scheduler_enabled: bool
     market_scheduler_driver: Literal["celery", "vercel"]

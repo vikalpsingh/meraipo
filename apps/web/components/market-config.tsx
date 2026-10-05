@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 
 type Config = {
+  bhavcopy_sources_json?: string;
   provider_mode: string;
   market_scheduler_enabled: boolean;
   market_scheduler_driver: 'celery' | 'vercel';
@@ -43,6 +44,7 @@ export function MarketConfig({ csrf }: { csrf: string }) {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const body = {
+      bhavcopy_sources_json: config?.bhavcopy_sources_json || '{}',
       provider_mode: form.get('provider_mode'),
       market_scheduler_enabled: form.has('market_scheduler_enabled'),
       market_scheduler_driver: form.get('market_scheduler_driver'),

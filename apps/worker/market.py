@@ -371,6 +371,10 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
         if not snapshot:
             snapshot = m.PriceSnapshot(company_id=company.id)
             db.add(snapshot)
+        if snapshot.closing_exchange:
+            # The exchange-specific daily-close pipeline owns this summary now.
+            await db.flush()
+            return True
         snapshot.cmp, snapshot.price_date = latest.close, latest.price_date
         snapshot.ath = max(p.high or p.close for p in history)
         snapshot.high_52w, snapshot.low_52w = (

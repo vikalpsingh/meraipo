@@ -12,6 +12,7 @@ from packages.shared.config import Settings, base_settings, use_settings
 
 CONFIG_ID = "market"
 EDITABLE_FIELDS = (
+    "bhavcopy_sources_json",
     "provider_mode",
     "market_scheduler_enabled",
     "market_scheduler_driver",

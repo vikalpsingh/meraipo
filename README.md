@@ -52,6 +52,7 @@ See [.env.example](.env.example) for configuration. Production requires `ENVIRON
 - [Deployment and backups](docs/deployment.md), [implementation/release status](docs/implementation-status.md)
 - [Applicant features and guide maintenance](docs/applicant-experience.md)
 - [Market integration, scheduler setup and deployment](docs/market-data.md)
+- [Daily NSE/BSE closing files, retention and operations](docs/bhavcopy.md)
 - [Data integration test coverage](docs/market-data-tests.md)
 
 The current upgrade has not been deployed to the previous live prototype.

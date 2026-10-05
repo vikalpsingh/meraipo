@@ -1,0 +1,58 @@
+{
+  "NSE": {
+    "enabled": true,
+    "url_template": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{yyyymmdd}_F_0000.csv.zip",
+    "verified_on": "2026-10-01",
+    "public_display_allowed": false,
+    "calendar_year": 2026,
+    "calendar_source": "https://nsearchives.nseindia.com/content/circulars/CMTR71775.pdf",
+    "holidays": [
+      "2026-01-26",
+      "2026-03-03",
+      "2026-03-26",
+      "2026-03-31",
+      "2026-04-03",
+      "2026-04-14",
+      "2026-05-01",
+      "2026-05-28",
+      "2026-06-26",
+      "2026-09-14",
+      "2026-10-02",
+      "2026-10-20",
+      "2026-11-10",
+      "2026-11-24",
+      "2026-12-25"
+    ],
+    "special_sessions": [
+      "2026-11-08"
+    ]
+  },
+  "BSE": {
+    "enabled": true,
+    "url_template": "https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_{yyyymmdd}_F_0000.CSV",
+    "verified_on": "2026-09-29",
+    "public_display_allowed": false,
+    "calendar_year": 2026,
+    "calendar_source": "https://www.bseindia.com/markets/MarketInfo/DispNewNoticesCirculars.aspx?page=20251212-8",
+    "holidays": [
+      "2026-01-26",
+      "2026-03-03",
+      "2026-03-26",
+      "2026-03-31",
+      "2026-04-03",
+      "2026-04-14",
+      "2026-05-01",
+      "2026-05-28",
+      "2026-06-26",
+      "2026-09-14",
+      "2026-10-02",
+      "2026-10-20",
+      "2026-11-10",
+      "2026-11-24",
+      "2026-12-25"
+    ],
+    "special_sessions": [
+      "2026-11-08"
+    ]
+  }
+}

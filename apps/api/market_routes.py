@@ -80,6 +80,12 @@ async def dispatch(db, job, trigger, data):
         if not company or company.is_demo:
             raise HTTPException(422, "Choose a tracked, non-demo company")
         params["company_id"] = data.company_id
+    if job == "sync-results" and data.from_date and data.to_date:
+        if data.to_date > date.today() or not 0 <= (data.to_date - data.from_date).days <= 1461:
+            raise HTTPException(422, "Choose a past date range of up to four years")
+        params.update(
+            {"from": data.from_date.isoformat(), "to": data.to_date.isoformat(), "history": True}
+        )
     if job == "backfill":
         if not (data.confirm_backfill and data.company_id and data.from_date and data.to_date):
             raise HTTPException(422, "Confirm a company and bounded date range for backfill")
@@ -109,6 +115,12 @@ async def cron(job: str, request: Request, db=Depends(get_session)):
         request.headers.get("authorization", ""), "Bearer " + secret
     ):
         raise HTTPException(401, "Invalid cron authentication")
+    if job == "sync-results" and data.from_date and data.to_date:
+        if data.to_date > date.today() or not 0 <= (data.to_date - data.from_date).days <= 1461:
+            raise HTTPException(422, "Choose a past date range of up to four years")
+        params.update(
+            {"from": data.from_date.isoformat(), "to": data.to_date.isoformat(), "history": True}
+        )
     if job == "backfill":
         raise HTTPException(404, "Manual job only")
     runtime = await load_market_settings(db)
@@ -164,6 +176,9 @@ async def save_market_configuration(
                 provider["token"] = current_feeds.get(kind, {}).get(name, {}).get("token", "")
     market_feeds_json = json.dumps(submitted_feeds, separators=(",", ":"))
     try:
+        from packages.providers.bhavcopy import sources
+
+        sources(values["bhavcopy_sources_json"])
         configuration(market_feeds_json)
         discovery_sources(values["exchange_sources_json"])
         bse_configuration(values["bse_ipo_issues_json"])

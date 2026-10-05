@@ -34,6 +34,7 @@ export type Quarter = {
   verification_status: string;
 };
 export type Company = {
+  financial_performance?: import('@/components/financial-performance').FinancialPerformanceData;
   provider_details?: {
     provider: string;
     source_url: string;
@@ -95,6 +96,9 @@ export type Company = {
   price_high: number | null;
   issue_price: number | null;
   listing_price: number | null;
+  listing_price_date?: string | null;
+  listing_price_exchange?: string | null;
+  listing_gain?: number | null;
   lot_size: number | null;
   minimum_application: number | null;
   issue_size: number | null;
@@ -106,6 +110,8 @@ export type Company = {
   gmp_quality: string;
   cmp: number | null;
   price_date: string | null;
+  closing_exchange?: string | null;
+  daily_change_pct?: number | null;
   ath: number | null;
   high_52w: number | null;
   low_52w: number | null;
