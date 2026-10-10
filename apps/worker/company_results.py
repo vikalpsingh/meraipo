@@ -12,7 +12,15 @@ from packages.shared.calculations import utc
 async def sync_official_sources(db, run, counts, company_ids):
     from apps.worker import results as worker
     from apps.worker.bse_results import drain, event, failure
-    sources = (await db.scalars(select(m.CompanyResultSource).where(m.CompanyResultSource.company_id.in_(company_ids), m.CompanyResultSource.enabled.is_(True)))).all()
+
+    sources = (
+        await db.scalars(
+            select(m.CompanyResultSource).where(
+                m.CompanyResultSource.company_id.in_(company_ids),
+                m.CompanyResultSource.enabled.is_(True),
+            )
+        )
+    ).all()
     if not sources:
         event(db, run, "official_company_discovery", "NO_APPROVED_SOURCE")
         await db.commit()
@@ -27,16 +35,31 @@ async def sync_official_sources(db, run, counts, company_ids):
                         if identities["NSE"] or not identities["BSE"]:
                             continue
                         for url in await discover(session):
-                            filing, created = await worker.store_filing(db, "BSE", {"identifier": sorted(identities["BSE"])[0], "origin": "OFFICIAL_COMPANY", "source_url": source.page_url, "attachments": [url]})
+                            filing, created = await worker.store_filing(
+                                db,
+                                "BSE",
+                                {
+                                    "identifier": sorted(identities["BSE"])[0],
+                                    "origin": "OFFICIAL_COMPANY",
+                                    "source_url": source.page_url,
+                                    "attachments": [url],
+                                },
+                            )
                             counts["fetched"] += 1
                             counts["unchanged"] += int(not created)
-                            if not created and (filing.status not in ("AWAITING_PROCESSING", "DOWNLOAD_RETRY") or filing.retry_at and utc(filing.retry_at) > m.now()):
+                            if not created and (
+                                filing.status not in ("AWAITING_PROCESSING", "DOWNLOAD_RETRY")
+                                or filing.retry_at
+                                and utc(filing.retry_at) > m.now()
+                            ):
                                 continue
                             # Identity/period/basis/units checked by the same parser. Unknown
                             # publication dates and PDFs remain in review, never auto-published.
                             await worker.process(db, filing, session, counts, run=run)
                     except Exception as exc:
-                        failure(db, run, counts, "official_company_discovery", exc, source.company_id)
+                        failure(
+                            db, run, counts, "official_company_discovery", exc, source.company_id
+                        )
                     finally:
                         drain(db, run, session)
                         await db.commit()

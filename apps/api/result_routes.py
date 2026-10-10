@@ -41,7 +41,19 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         )
     ).all()
     official_sources = (await db.scalars(select(m.CompanyResultSource))).all()
-    companies = (await db.scalars(select(m.Company).where(m.Company.is_demo.is_(False), m.Company.id.in_(select(m.Identifier.company_id).where(m.Identifier.exchange == "BSE")), ~m.Company.id.in_(select(m.Identifier.company_id).where(m.Identifier.exchange == "NSE"))))).all()
+    companies = (
+        await db.scalars(
+            select(m.Company).where(
+                m.Company.is_demo.is_(False),
+                m.Company.id.in_(
+                    select(m.Identifier.company_id).where(m.Identifier.exchange == "BSE")
+                ),
+                ~m.Company.id.in_(
+                    select(m.Identifier.company_id).where(m.Identifier.exchange == "NSE")
+                ),
+            )
+        )
+    ).all()
     return {
         "official_sources": [record(s) for s in official_sources],
         "bse_companies": [{"id": c.id, "name": c.name} for c in companies],
@@ -103,11 +115,33 @@ class ManualFiling(Input):
 @router.post("/filings")
 async def filing(data: ManualFiling, auth=Depends(admin), db=Depends(get_session)):
     try:
-        feed.exchange_url(data.source_url)
+        official = False
+        try:
+            feed.exchange_url(data.source_url)
+        except feed.FeedError:
+            mapping = await db.scalar(
+                select(m.Identifier).where(
+                    m.Identifier.exchange == data.exchange, m.Identifier.ticker == data.identifier
+                )
+            )
+            source = await db.get(m.CompanyResultSource, mapping.company_id) if mapping else None
+            if (
+                data.exchange != "BSE"
+                or not source
+                or not source.enabled
+                or not data.source_url.startswith(source.document_prefix)
+            ):
+                raise
+            from packages.providers.company_results import approved_url
+
+            approved_url(data.source_url, source.page_url)
+            official = True
         if data.announced_at.tzinfo is None:
             raise ValueError("Filing timestamp requires timezone")
         metadata = data.model_dump(mode="json", exclude={"exchange"})
         metadata["attachments"] = [data.source_url]
+        if official:
+            metadata["origin"] = "OFFICIAL_COMPANY"
         row, _ = await worker.store_filing(db, data.exchange, metadata)
         await db.commit()
         return record(row)
@@ -237,14 +271,19 @@ class OfficialSource(Input):
 
 
 @router.put("/official-sources/{company_id}")
-async def configure_official(company_id: str, data: OfficialSource, auth=Depends(admin), db=Depends(get_session)):
+async def configure_official(
+    company_id: str, data: OfficialSource, auth=Depends(admin), db=Depends(get_session)
+):
     from packages.providers.company_results import approved_url, public_address
+
     company = await db.get(m.Company, company_id)
     if not company or company.is_demo:
         raise HTTPException(422, "Choose a tracked BSE-only company")
     identifiers = await worker.company_identifiers(db, company)
     if not identifiers["BSE"] or identifiers["NSE"] or not data.official_source_confirmed:
-        raise HTTPException(422, "Confirm the official investor-relations source for a BSE-only company")
+        raise HTTPException(
+            422, "Confirm the official investor-relations source for a BSE-only company"
+        )
     try:
         approved_url(data.page_url)
         approved_url(data.document_prefix, data.page_url)
@@ -252,13 +291,26 @@ async def configure_official(company_id: str, data: OfficialSource, auth=Depends
             raise ValueError("Document directory must end with /")
         await public_address(data.page_url)
     except (ValueError, OSError, feed.FeedError) as exc:
-        raise HTTPException(422, "Use an approved public HTTPS page and a document directory on the same host") from exc
+        raise HTTPException(
+            422, "Use an approved public HTTPS page and a document directory on the same host"
+        ) from exc
     source = await db.get(m.CompanyResultSource, company_id)
     if not source:
         source = m.CompanyResultSource(company_id=company_id)
         db.add(source)
-    source.page_url, source.document_prefix, source.enabled = data.page_url, data.document_prefix, data.enabled
+    source.page_url, source.document_prefix, source.enabled = (
+        data.page_url,
+        data.document_prefix,
+        data.enabled,
+    )
     source.approved_by, source.approved_at = auth[0].id, m.now()
-    db.add(m.Audit(admin_id=auth[0].id, action="results.official_source", entity_id=company_id, changes=data.model_dump()))
+    db.add(
+        m.Audit(
+            admin_id=auth[0].id,
+            action="results.official_source",
+            entity_id=company_id,
+            changes=data.model_dump(),
+        )
+    )
     await db.commit()
     return {"saved": True}

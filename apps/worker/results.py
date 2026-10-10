@@ -60,7 +60,16 @@ async def store_filing(db, exchange, metadata):
     )
     identity = digest([exchange, metadata])
     if exchange == "BSE" and metadata.get("filing_id"):
-        identity = digest([exchange, identifier, metadata["filing_id"], metadata.get("announced_at"), metadata.get("attachment_name"), metadata.get("subject")])
+        identity = digest(
+            [
+                exchange,
+                identifier,
+                metadata["filing_id"],
+                metadata.get("announced_at"),
+                metadata.get("attachment_name"),
+                metadata.get("subject"),
+            ]
+        )
     existing = await db.scalar(select(m.ResultFiling).where(m.ResultFiling.identity == identity))
     if existing:
         return existing, False
@@ -189,12 +198,21 @@ async def process(db, filing, session, counts, run=None):
             if attachment.content_type != "application/xml":
                 if run:
                     from apps.worker.bse_results import event
-                    event(db, run, "parsing", "PARSING_REVIEW_REQUIRED", filing_id=filing.id, content_type=attachment.content_type)
+
+                    event(
+                        db,
+                        run,
+                        "parsing",
+                        "PARSING_REVIEW_REQUIRED",
+                        filing_id=filing.id,
+                        content_type=attachment.content_type,
+                    )
                 continue
             stage = "parsing"
             parsed = await preview(db, filing, content)
             if run:
                 from apps.worker.bse_results import event
+
                 event(db, run, stage, "SUCCESS", filing_id=filing.id, periods=len(parsed))
             stage = "publication"
             async with db.begin_nested():
@@ -207,6 +225,7 @@ async def process(db, filing, session, counts, run=None):
             filing.error = str(exc) if isinstance(exc, feed.FeedError) else type(exc).__name__
             if run:
                 from apps.worker.bse_results import event
+
                 event(db, run, stage, filing.error, filing_id=filing.id)
             filing.status = (
                 "DOWNLOAD_RETRY"
@@ -246,6 +265,7 @@ async def sync(db, run, counts, session_factory=feed.ExchangeSession):
     for exchange in sorted(parameters.get("exchanges", ["NSE", "BSE"]), key=lambda ex: ex != "NSE"):
         if exchange == "BSE":
             from apps.worker.bse_results import sync_bse
+
             note = await sync_bse(db, run, counts, start, end, session_factory)
             if note:
                 notes.append(note)

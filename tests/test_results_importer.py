@@ -84,7 +84,7 @@ async def test_sessions_redirect_scope_and_block():
 
     async with feed.ExchangeSession("BSE", httpx.MockTransport(handle)) as session:
         await session.initialize()
-        with pytest.raises(feed.SourceError, match="SOURCE_ACCESS_BLOCKED"):
+        with pytest.raises(feed.SourceError, match="SOURCE_HTTP_403"):
             await session.get(feed.BSE_TODAY)
     assert len(calls) == 3
 
@@ -225,7 +225,8 @@ async def test_exchange_failure_isolated(db):
 
     counts = dict(fetched=0, written=0, unchanged=0, failed=0, providers=0)
     await worker.sync(db, run, counts, Session)
-    assert counts["providers"] == 1 and counts["failed"] == 1
+    assert counts["providers"] == 1 and counts["failed"] == 0
+    assert counts["skipped_nse_companies"] == 1
     bse, nse = await db.get(m.ResultSource, "BSE"), await db.get(m.ResultSource, "NSE")
     assert bse.last_success is None
     assert nse.last_success is not None

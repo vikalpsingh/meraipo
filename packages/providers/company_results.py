@@ -13,9 +13,19 @@ from packages.providers.result_http import ExchangeSession, SourceError
 
 def approved_url(url, origin=None):
     p = urlsplit(url)
-    if (p.scheme != "https" or not p.hostname or p.username or p.password or p.port not in (None, 443)
-            or p.query or p.fragment or "\\" in unquote(p.path) or ".." in unquote(p.path).split("/")
-            or origin and p.hostname != urlsplit(origin).hostname):
+    if (
+        p.scheme != "https"
+        or not p.hostname
+        or p.username
+        or p.password
+        or p.port not in (None, 443)
+        or p.query
+        or p.fragment
+        or "\\" in unquote(p.path)
+        or ".." in unquote(p.path).split("/")
+        or origin
+        and p.hostname != urlsplit(origin).hostname
+    ):
         raise SourceError("UNAPPROVED_COMPANY_SOURCE")
     try:
         if not ipaddress.ip_address(p.hostname).is_global:
@@ -42,7 +52,12 @@ class CompanySession(ExchangeSession):
         self.page_url = approved_url(page_url)
         self.document_prefix = approved_url(document_prefix, page_url)
         self.client.headers.clear()
-        self.client.headers.update({"User-Agent": "MeraIPO/1.0 (+official financial results)", "Accept": "text/html,application/xml,application/pdf,*/*"})
+        self.client.headers.update(
+            {
+                "User-Agent": "MeraIPO/1.0 (+official financial results)",
+                "Accept": "text/html,application/xml,application/pdf,*/*",
+            }
+        )
 
     async def request_target(self, url):
         approved_url(url, self.page_url)
@@ -73,7 +88,9 @@ async def discover(session):
     urls = set()
     for href in parser.links:
         url = urljoin(session.page_url, href)
-        if url.startswith(session.document_prefix) and urlsplit(url).path.lower().endswith((".xml", ".xbrl", ".pdf", ".xlsx", ".xls")):
+        if url.startswith(session.document_prefix) and urlsplit(url).path.lower().endswith(
+            (".xml", ".xbrl", ".pdf", ".xlsx", ".xls")
+        ):
             approved_url(url, session.page_url)
             urls.add(url)
     return sorted(urls)[:30]

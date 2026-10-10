@@ -30,13 +30,27 @@ def is_result(row):
     text = " ".join(str(row.get(k) or "") for k in ("SUBCATNAME", "NEWSSUB")).casefold()
     if "intimation" in text or "board meeting" in text and "outcome" not in text:
         return False
-    return category in ("result", "results") or "financial results" in text or "integrated filing" in text and "financial" in text
+    return (
+        category in ("result", "results")
+        or "financial results" in text
+        or "integrated filing" in text
+        and "financial" in text
+    )
 
 
 async def discover(session, code, start, end):
     found, seen, expected = [], set(), None
     for page in range(1, 101):
-        params = dict(pageno=page, strCat="-1", subcategory="-1", strPrevDate=start.strftime("%Y%m%d"), strToDate=end.strftime("%Y%m%d"), strSearch="P", strscrip=code, strType="C")
+        params = dict(
+            pageno=page,
+            strCat="-1",
+            subcategory="-1",
+            strPrevDate=start.strftime("%Y%m%d"),
+            strToDate=end.strftime("%Y%m%d"),
+            strSearch="P",
+            strscrip=code,
+            strType="C",
+        )
         url = ANNOUNCEMENTS + "?" + urlencode(params)
         content = await session.get(url)
         try:
@@ -58,11 +72,19 @@ async def discover(session, code, start, end):
                 stamp = datetime.fromisoformat(row["DT_TM"])
                 if stamp.tzinfo is None:
                     stamp = stamp.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
-                found.append({"identifier": code, "filing_id": key, "announced_at": stamp.isoformat(),
-                              "attachments": [url_attachment] if url_attachment else [], "source_url": ANNOUNCEMENTS,
-                              # Stable fields exclude changing RN/OLD/archive location from identity.
-                              "subject": row.get("NEWSSUB"), "category": row.get("CATEGORYNAME"),
-                              "attachment_name": row.get("ATTACHMENTNAME")})
+                found.append(
+                    {
+                        "identifier": code,
+                        "filing_id": key,
+                        "announced_at": stamp.isoformat(),
+                        "attachments": [url_attachment] if url_attachment else [],
+                        "source_url": ANNOUNCEMENTS,
+                        # Stable fields exclude changing RN/OLD/archive location from identity.
+                        "subject": row.get("NEWSSUB"),
+                        "category": row.get("CATEGORYNAME"),
+                        "attachment_name": row.get("ATTACHMENTNAME"),
+                    }
+                )
             if len(seen) == total:
                 return found
             if not rows or len(seen) > total:

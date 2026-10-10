@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
 
 from packages.providers.exchanges import exchange_url, source_timestamp
+from packages.providers.market import FeedError as FeedError
 from packages.providers.result_http import ExchangeSession as ExchangeSession
 from packages.providers.result_http import SourceError as SourceError
 
@@ -35,8 +36,6 @@ CONCEPTS = {
     "basic_eps": "BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations",
     "diluted_eps": "DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations",
 }
-
-
 
 
 def bse_csv(content):

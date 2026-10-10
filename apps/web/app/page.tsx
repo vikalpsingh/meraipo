@@ -34,8 +34,8 @@ export default async function Home({
   const sections: [string, Company[], string][] = [
     ['Open for subscription', open.items, 'open'],
     ['Coming next', scheduled, 'upcoming'],
-    ['Announced · dates awaited', announced, 'announced'],
     ['Closed · awaiting listing', closed, 'closed'],
+    ['Announced · dates awaited', announced, 'announced'],
     ...(query
       ? [
           ['Listed companies', recent.items.filter((c) => c.status === 'LISTED'), 'listed'] as [

@@ -1,6 +1,11 @@
 """Safe, actionable operator guidance; never include credentials or raw responses."""
 
 GUIDANCE = {
+    "SOURCE_HTTP_403": "The source returned HTTP 403. Inspect the financial-results stage diagnostics and reference ID. Do not repeatedly retry denials; use an approved official company source or manual upload.",
+    "SOURCE_HTTP_406": "The source returned HTTP 406. Inspect request-stage diagnostics and the response excerpt; review supported request headers with the source operator.",
+    "SOURCE_TIMEOUT": "The source exceeded the bounded request deadline. Review its stage and elapsed time; completed company checkpoints are retained.",
+    "SOURCE_BLOCK_PAGE": "The source returned an access-denial page instead of data. The response was rejected and no figures were published.",
+    "NO_BSE_ONLY_COMPANIES": "BSE results only process companies without an NSE identifier. Dual-listed companies are handled by the NSE job.",
     "WAITING_FOR_PREVIOUS_JOB": "No action required. This job stays queued and retries automatically after the preceding job finishes.",
     "NOT_YET_PUBLISHED": "The dated file was not found. Check the exchange trading calendar and publication time, then retry that date or upload the official final file.",
     "SOURCE_ACCESS_BLOCKED": "The exchange denied access (403/406). Verify permitted source access; use an official-file upload if available. Repeated automatic retries will not fix access restrictions.",
