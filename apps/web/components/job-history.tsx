@@ -7,6 +7,7 @@ export function RunStatus({ status }: { status: string }) {
   return <span className={`job-status job-status--${status.toLowerCase()}`}>{human(status)}</span>;
 }
 type Detail = {
+  diagnostics?: { id: string; stage: string; code: string; evidence: unknown }[];
   run: JobRun;
   guidance: string;
   error_count: number;
@@ -293,6 +294,21 @@ export function JobHistory({
               </details>
               {['FAILED', 'PARTIAL', 'SKIPPED'].includes(detail.run.status) && (
                 <p className="notice">{detail.guidance}</p>
+              )}
+              {!!detail.diagnostics?.length && (
+                <details>
+                  <summary>
+                    Financial-results stage diagnostics ({detail.diagnostics.length})
+                  </summary>
+                  {detail.diagnostics.map((d) => (
+                    <article key={d.id}>
+                      <strong>
+                        {human(d.stage)} · {d.code}
+                      </strong>
+                      <pre>{JSON.stringify(d.evidence, null, 2)}</pre>
+                    </article>
+                  ))}
+                </details>
               )}
               <h4>Errors ({detail.error_count})</h4>
               {!detail.errors.length && (

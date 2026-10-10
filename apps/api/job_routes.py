@@ -222,6 +222,7 @@ async def diagnostics(run_id: str, auth=Depends(admin), db=Depends(get_session))
         )
     ).all()
     return {
+        "diagnostics": [record(d) for d in (await db.scalars(select(m.ResultDiagnostic).where(m.ResultDiagnostic.run_id == run_id).order_by(m.ResultDiagnostic.created_at).limit(250))).all()],
         "run": run_record(run),
         "errors": [dict(record(e), guidance=guidance(e.code)) for e in errors],
         "error_count": error_count,

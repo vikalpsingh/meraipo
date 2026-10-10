@@ -28,3 +28,20 @@ so rearranging columns cannot mismatch labels and values.
 Validation: real NSE/BSE sample-file imports through API output, price corrections,
 backfills after newer CMP, negative returns, missing/zero bands, display permissions,
 listing-date corrections, and desktop/mobile column rendering.
+
+
+Tracker sorting accepts `sort=return_ipo|drawdown` and `order=asc|desc`.
+Sorting happens after filtering and before pagination; null values remain last,
+with company name and ID breaking ties. Rows above (not equal to) 100% IPO gain
+have a light green background. Header links reset the page and retain filters;
+mobile users can use the Sort by and Order controls.
+
+Screener links use the existing company.screener_url when valid. IPOAlerts
+screenerUrl/screener_url fields are normalized and persisted through the existing
+company ingestion flow; absent values preserve existing links. When absent,
+the API builds a consolidated link from persisted BSE security code, then NSE
+symbol. BSE issue IDs and company-name guesses are never used. No Screener
+scraping or per-request external lookup is performed, and missing identifiers
+produce no link. Exchange-derived URLs are candidates; coverage on Screener is
+outside this app's control. Existing records need no migration or duplicate URL
+backfill because the company-linked identifiers are already stored.

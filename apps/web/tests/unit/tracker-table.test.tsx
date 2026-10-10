@@ -24,7 +24,9 @@ const company = {
 } as Company;
 it('keeps price and gain columns first and prioritizes populated quarterly metrics', () => {
   render(<TrackerTable companies={[company]} />);
-  const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+  const headers = screen
+    .getAllByRole('columnheader')
+    .map((h) => h.textContent?.replace(/ [↕↑↓]$/, ''));
   expect(headers.slice(0, 7)).toEqual([
     'Company',
     'Issue size (₹ crore)',
@@ -54,4 +56,27 @@ it('shows unavailable listing data without inventing a price or gain', () => {
   expect(
     screen.getByTestId('company-row').querySelector('[data-label="Listing gain"]'),
   ).toHaveTextContent('—');
+});
+
+it('sorts through links preserving filters and resets pagination', () => {
+  render(
+    <TrackerTable companies={[company]} query="sort=return_ipo&order=desc&board=SME&page=3" />,
+  );
+  const link = screen.getByRole('link', { name: 'Gain since IPO' });
+  expect(link).toHaveAttribute('href', '/tracker?sort=return_ipo&order=asc&board=SME');
+  expect(link.closest('th')).toHaveAttribute('aria-sort', 'descending');
+});
+it('highlights only gains strictly above 100 percent', () => {
+  render(
+    <TrackerTable
+      companies={[101, 100, -2, null].map((value, i) => ({
+        ...company,
+        id: String(i),
+        return_ipo: value,
+      }))}
+    />,
+  );
+  expect(
+    screen.getAllByTestId('company-row').map((r) => r.classList.contains('ipo-gain-highlight')),
+  ).toEqual([true, false, false, false]);
 });

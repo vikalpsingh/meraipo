@@ -97,6 +97,16 @@ export default async function Journey({
             {c.name}
             <span>.</span>
           </h1>
+          {c.screener_url && (
+            <a
+              className="text-link"
+              href={c.screener_url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View on Screener ↗
+            </a>
+          )}
           <p>
             {c.sector} ·{' '}
             {c.status === 'LISTED' ? 'Listed ' + date(c.listing_date) : human(c.status)}

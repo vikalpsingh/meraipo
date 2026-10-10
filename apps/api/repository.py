@@ -17,6 +17,7 @@ from packages.shared.calculations import (
 )
 from packages.shared.config import settings
 from packages.shared.ipo_lifecycle import lifecycle, public_status
+from packages.shared.screener import screener_url
 
 METRICS = ("revenue", "ebitda", "pat", "eps", "debt", "cfo", "roe", "roce")
 
@@ -298,6 +299,17 @@ async def catalog(db, today=None):
             )
         ).all()
     }
+    screener_identifiers = {}
+    for identity in (
+        await db.scalars(
+            select(m.Identifier).where(
+                m.Identifier.company_id.in_(ids), m.Identifier.exchange.in_(["BSE", "NSE"])
+            )
+        )
+    ).all():
+        screener_identifiers.setdefault(identity.company_id, []).append(
+            (identity.exchange, identity.ticker)
+        )
     values = {
         v.company_id: v
         for v in (
@@ -507,7 +519,9 @@ async def catalog(db, today=None):
                     if valuation
                     else "Data unavailable"
                 ),
-                "screener_url": company.screener_url,
+                "screener_url": screener_url(
+                    company.screener_url, screener_identifiers.get(company.id, [])
+                ),
                 "exchange_url": company.exchange_url,
             }
         )

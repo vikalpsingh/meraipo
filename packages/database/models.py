@@ -630,3 +630,22 @@ class FinancialResult(Entity, Base):
             "company_id", "period_start", "period_end", "period_type", "basis", "revision"
         ),
     )
+
+
+class ResultDiagnostic(Entity, Base):
+    __tablename__ = "result_diagnostics"
+    run_id: Mapped[str] = mapped_column(ForeignKey("data_import_runs.id"), index=True)
+    exchange: Mapped[str] = mapped_column(String(3))
+    stage: Mapped[str] = mapped_column(String(50))
+    code: Mapped[str] = mapped_column(String(80))
+    evidence: Mapped[dict] = mapped_column(JSON)
+
+
+class CompanyResultSource(Base):
+    __tablename__ = "company_result_sources"
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), primary_key=True)
+    page_url: Mapped[str] = mapped_column(Text)
+    document_prefix: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_by: Mapped[str] = mapped_column(ForeignKey("admin_users.id"))
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

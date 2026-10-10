@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import type { Company } from '@/lib/types';
 import { date, human, money, number, percent } from '@/lib/format';
 import { Trust } from './content';
-
 type Column = {
   label: string;
   available: (c: Company) => boolean;
@@ -55,8 +54,19 @@ function Gain({ value }: { value: number | null | undefined }) {
     </span>
   );
 }
-export function TrackerTable({ companies }: { companies: Company[] }) {
-  // Keep price columns stable; put research fields with available data ahead of empty ones.
+export function TrackerTable({ companies, query = '' }: { companies: Company[]; query?: string }) {
+  const params = new URLSearchParams(query);
+  const sortKeys: Record<string, string> = {
+    'Gain since IPO': 'return_ipo',
+    'From recorded high': 'drawdown',
+  };
+  const sortHref = (key: string) => {
+    const next = new URLSearchParams(params);
+    next.set('sort', key);
+    next.set('order', params.get('sort') === key && params.get('order') !== 'asc' ? 'asc' : 'desc');
+    next.delete('page');
+    return '/tracker?' + next;
+  };
   const columns = [...research].sort(
     (a, b) => Number(companies.some(b.available)) - Number(companies.some(a.available)),
   );
@@ -66,7 +76,7 @@ export function TrackerTable({ companies }: { companies: Company[] }) {
         Listing price is the official listing-day closing price. Listing gain and gain since IPO use
         the IPO upper price band: (price ÷ upper band − 1) × 100. Returns exclude dividends and
         corporate-action adjustments. Available research columns appear before pending fields in
-        this view.
+        this view. Light green rows indicate gains above 100%. Missing values sort last.
       </p>
       <div className="panel table-panel">
         <div className="table-scroll" tabIndex={0} role="region" aria-label="IPO performance table">
@@ -84,15 +94,47 @@ export function TrackerTable({ companies }: { companies: Company[] }) {
                   ...columns.map((c) => c.label),
                   'Data',
                 ].map((label) => (
-                  <th key={label} scope="col">
-                    {label}
+                  <th
+                    key={label}
+                    scope="col"
+                    aria-sort={
+                      sortKeys[label]
+                        ? params.get('sort') === sortKeys[label]
+                          ? params.get('order') === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'
+                        : undefined
+                    }
+                  >
+                    {sortKeys[label] ? (
+                      <Link href={sortHref(sortKeys[label])} title="Click to change sort direction">
+                        {label}
+                        <span aria-hidden="true">
+                          {' '}
+                          {params.get('sort') === sortKeys[label]
+                            ? params.get('order') === 'asc'
+                              ? '↑'
+                              : '↓'
+                            : '↕'}
+                        </span>
+                      </Link>
+                    ) : (
+                      label
+                    )}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {companies.map((c) => (
-                <tr key={c.id} data-testid="company-row">
+                <tr
+                  key={c.id}
+                  data-testid="company-row"
+                  className={
+                    c.return_ipo != null && c.return_ipo > 100 ? 'ipo-gain-highlight' : undefined
+                  }
+                >
                   <th scope="row">
                     <Link href={'/ipo/' + c.slug}>{c.name} ↗</Link>
                     <small>

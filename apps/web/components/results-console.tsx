@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { human, timestamp } from '@/lib/format';
+import { OfficialResultsSource } from './official-results-source';
 type Filing = {
   id: string;
   exchange: string;
@@ -24,7 +25,17 @@ type Preview = {
   items: unknown[];
 };
 export function ResultsConsole({ csrf }: { csrf: string }) {
-  const [data, setData] = useState<{ sources: Source[]; filings: Filing[] }>({
+  const [data, setData] = useState<{
+    sources: Source[];
+    filings: Filing[];
+    bse_companies?: { id: string; name: string }[];
+    official_sources?: {
+      company_id: string;
+      page_url: string;
+      document_prefix: string;
+      enabled: boolean;
+    }[];
+  }>({
     sources: [],
     filings: [],
   });
@@ -101,6 +112,11 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
   return (
     <section className="panel" aria-label="Financial results importer">
       <h2>Financial results importer</h2>
+      <OfficialResultsSource
+        csrf={csrf}
+        companies={data.bse_companies || []}
+        sources={data.official_sources || []}
+      />
       <p>
         Configurable discovery and a rolling 14-day reconciliation. Originals and revisions are
         retained. Unverified figures require review.

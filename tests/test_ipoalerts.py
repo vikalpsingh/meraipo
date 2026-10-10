@@ -390,3 +390,23 @@ async def test_bad_row_reports_field_path_without_losing_good_rows():
     assert "bad-record:issue.lot_size" in batches[0].errors[0][0]
     assert batches[0].errors[0][1] == "IPOALERTS_INVALID_ROW"
     assert "test-secret" not in str(batches[0].errors)
+
+
+async def test_screener_feed_link_is_saved_and_missing_feed_preserves_it(db):
+    from apps.worker.market import ingest_record
+    from packages.providers.market import Issue
+
+    item = row(screenerUrl="https://screener.in/company/FIXTURE/consolidated/")
+    now = datetime.now(UTC) - timedelta(seconds=2)
+    for observed, incoming in [(now, item), (now + timedelta(seconds=1), row())]:
+        await ingest_record(
+            db,
+            "ipos",
+            Issue.model_validate(normalize(incoming, observed)),
+            "IPOALERTS",
+            "LICENSED",
+            None,
+        )
+        await db.flush()
+        company = await db.scalar(select(m.Company).where(m.Company.slug == item["slug"]))
+        assert company.screener_url == "https://www.screener.in/company/FIXTURE/consolidated/"

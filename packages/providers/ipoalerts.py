@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from packages.providers.ipo import IPOBatch
 from packages.providers.market import FeedError, Issue, Premium
+from packages.shared.screener import canonical_screener_url
 
 URL = "https://api.ipoalerts.in/ipos"
 STATUSES = ("open", "upcoming", "announced")
@@ -92,6 +93,9 @@ def normalize(row, observed_at):
             "source_url": URL,
             "exchange_url": row.get("nseInfoUrl") or bse_url,
             "rhp_url": row.get("prospectusUrl"),
+            "screener_url": canonical_screener_url(
+                row.get("screenerUrl") or row.get("screener_url")
+            ),
             "verification_status": "UNVERIFIED",
         },
         "allotment_date": events.get("allotment finalization"),

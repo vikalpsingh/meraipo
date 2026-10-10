@@ -6,6 +6,8 @@ import { human, fiscalToday } from '@/lib/format';
 import type { TrackerResult, Advertisement } from '@/lib/types';
 import { Ads } from '@/components/content';
 import { TrackerTable } from '@/components/tracker-table';
+import { TrackerPageSize } from '@/components/tracker-page-size';
+import { validTrackerPageSize } from '@/lib/tracker-pagination';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'IPO Tracker', alternates: { canonical: '/tracker' } };
 const views = [
@@ -27,6 +29,8 @@ export default async function Tracker({
   const today = fiscalToday();
   const query = new URLSearchParams();
   for (const [k, v] of Object.entries(input)) if (v !== undefined) query.set(k, v);
+  const deviceQuery = query.toString();
+  if (!validTrackerPageSize(query.get('page_size'))) query.set('page_size', '20');
   const apiQuery = new URLSearchParams([...query].filter(([, value]) => value !== ''));
   const [data, ads] = await Promise.all([
     api<TrackerResult>('/tracker?' + apiQuery),
@@ -73,6 +77,7 @@ export default async function Tracker({
         least 20% below the recorded all-time high.
       </p>
       <form className="filters" action="/tracker">
+        <input type="hidden" name="page_size" value={data.page_size} />
         <input type="hidden" name="view" value={query.get('view') || 'recent'} />
         <label>
           Financial year
@@ -117,6 +122,21 @@ export default async function Tracker({
             {data.sectors.map((s) => (
               <option key={s}>{s}</option>
             ))}
+          </select>
+        </label>
+        <label>
+          Sort by
+          <select name="sort" defaultValue={input.sort || ''}>
+            <option value="">Latest listings</option>
+            <option value="return_ipo">Gain since IPO</option>
+            <option value="drawdown">From recorded high</option>
+          </select>
+        </label>
+        <label>
+          Order
+          <select name="order" defaultValue={input.order || 'desc'}>
+            <option value="desc">Highest first</option>
+            <option value="asc">Lowest first</option>
           </select>
         </label>
         <button className="primary-button">Apply filters</button>
@@ -166,8 +186,9 @@ export default async function Tracker({
           </div>
         </details>
       </form>
+      <TrackerPageSize query={deviceQuery} size={data.page_size} />
       {data.items.length ? (
-        <TrackerTable companies={data.items} />
+        <TrackerTable companies={data.items} query={query.toString()} />
       ) : (
         <section className="panel empty">
           <h2>No companies match these filters.</h2>
@@ -180,7 +201,7 @@ export default async function Tracker({
       <div className="pagination">
         {data.page > 1 && <Link href={href('page', String(data.page - 1))}>← Previous</Link>}
         <span>
-          Page {data.page} · {data.total} companies
+          Page {data.page} · {data.total} companies · {data.page_size} rows per page
         </span>
         {data.page * data.page_size < data.total && (
           <Link href={href('page', String(data.page + 1))}>Next →</Link>

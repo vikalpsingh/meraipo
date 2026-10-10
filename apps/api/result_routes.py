@@ -40,7 +40,11 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             select(m.ResultHistory).order_by(m.ResultHistory.completed_at.desc()).limit(100)
         )
     ).all()
+    official_sources = (await db.scalars(select(m.CompanyResultSource))).all()
+    companies = (await db.scalars(select(m.Company).where(m.Company.is_demo.is_(False), m.Company.id.in_(select(m.Identifier.company_id).where(m.Identifier.exchange == "BSE")), ~m.Company.id.in_(select(m.Identifier.company_id).where(m.Identifier.exchange == "NSE"))))).all()
     return {
+        "official_sources": [record(s) for s in official_sources],
+        "bse_companies": [{"id": c.id, "name": c.name} for c in companies],
         "checkpoints": [record(c) for c in checkpoints],
         "sources": [record(s) for s in sources],
         "filings": [record(f) for f in filings],
@@ -223,3 +227,38 @@ async def attachments(filing_id: str, auth=Depends(admin), db=Depends(get_sessio
             for r in rows
         ]
     }
+
+
+class OfficialSource(Input):
+    page_url: str = Field(max_length=2000)
+    document_prefix: str = Field(max_length=2000)
+    enabled: bool
+    official_source_confirmed: bool
+
+
+@router.put("/official-sources/{company_id}")
+async def configure_official(company_id: str, data: OfficialSource, auth=Depends(admin), db=Depends(get_session)):
+    from packages.providers.company_results import approved_url, public_address
+    company = await db.get(m.Company, company_id)
+    if not company or company.is_demo:
+        raise HTTPException(422, "Choose a tracked BSE-only company")
+    identifiers = await worker.company_identifiers(db, company)
+    if not identifiers["BSE"] or identifiers["NSE"] or not data.official_source_confirmed:
+        raise HTTPException(422, "Confirm the official investor-relations source for a BSE-only company")
+    try:
+        approved_url(data.page_url)
+        approved_url(data.document_prefix, data.page_url)
+        if not data.document_prefix.endswith("/"):
+            raise ValueError("Document directory must end with /")
+        await public_address(data.page_url)
+    except (ValueError, OSError, feed.FeedError) as exc:
+        raise HTTPException(422, "Use an approved public HTTPS page and a document directory on the same host") from exc
+    source = await db.get(m.CompanyResultSource, company_id)
+    if not source:
+        source = m.CompanyResultSource(company_id=company_id)
+        db.add(source)
+    source.page_url, source.document_prefix, source.enabled = data.page_url, data.document_prefix, data.enabled
+    source.approved_by, source.approved_at = auth[0].id, m.now()
+    db.add(m.Audit(admin_id=auth[0].id, action="results.official_source", entity_id=company_id, changes=data.model_dump()))
+    await db.commit()
+    return {"saved": True}

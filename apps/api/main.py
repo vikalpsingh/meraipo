@@ -242,6 +242,8 @@ async def tracker(
     ] = "recent",
     quality: Literal["VERIFIED", "PARTIAL", "STALE", "UNVERIFIED", "CONFLICT"] | None = None,
     trend: Literal["IMPROVING", "STABLE", "WEAKENING", "INSUFFICIENT_DATA"] | None = None,
+    sort: Literal["return_ipo", "drawdown"] | None = None,
+    order: Literal["asc", "desc"] = "desc",
     min_return: float | None = None,
     max_return: float | None = None,
     min_drawdown: float | None = None,
@@ -310,6 +312,16 @@ async def tracker(
         ):
             continue
         items.append(c)
+    if sort:
+        # Missing metrics stay last in either direction; ties remain stable across pages.
+        items.sort(
+            key=lambda c: (
+                c[sort] is None,
+                (c[sort] if order == "asc" else -c[sort]) if c[sort] is not None else 0,
+                c["name"].casefold(),
+                str(c["id"]),
+            )
+        )
     return {
         "items": items[(page - 1) * page_size : page * page_size],
         "total": len(items),

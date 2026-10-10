@@ -1,22 +1,19 @@
 """Verified exchange discovery and conservative, versioned financial XBRL parsing."""
 
-import asyncio
 import csv
 import io
 import json
 import re
 import zipfile
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from decimal import Decimal
-from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode, urljoin
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
 
-import httpx
-
 from packages.providers.exchanges import exchange_url, source_timestamp
-from packages.providers.market import FeedError
+from packages.providers.result_http import ExchangeSession as ExchangeSession
+from packages.providers.result_http import SourceError as SourceError
 
 VERSION = "results-2026.1"
 LANDINGS = {
@@ -40,78 +37,6 @@ CONCEPTS = {
 }
 
 
-class SourceError(FeedError):
-    def __init__(self, code, retry_at=None):
-        super().__init__(code)
-        self.retry_at = retry_at
-
-
-class ExchangeSession:
-    def __init__(self, exchange, transport=None):
-        self.exchange = exchange
-        self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(18, connect=5),
-            follow_redirects=False,
-            transport=transport,
-            headers={
-                "User-Agent": "Mozilla/5.0 (compatible; MeraIPO/1.0)",
-                "Accept": "application/json,text/csv,application/xml,text/html",
-                "Referer": LANDINGS[exchange],
-            },
-        )
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        await self.client.aclose()
-
-    async def initialize(self):
-        await self.get(LANDINGS[self.exchange], landing=True)
-
-    async def get(self, url, landing=False):
-        for attempt in range(2):
-            try:
-                for redirect in range(6):
-                    exchange_url(url)
-                    async with self.client.stream("GET", url) as response:
-                        if response.is_redirect:
-                            url = urljoin(url, response.headers.get("location", ""))
-                            if redirect == 5:
-                                raise SourceError("SOURCE_REDIRECT_LIMIT")
-                            continue
-                        if response.status_code in (403, 406):
-                            raise SourceError("SOURCE_ACCESS_BLOCKED")
-                        if response.status_code == 429:
-                            value = response.headers.get("retry-after", "60")
-                            try:
-                                retry = datetime.now(timezone.utc) + timedelta(seconds=int(value))
-                            except ValueError:
-                                try:
-                                    retry = parsedate_to_datetime(value)
-                                except ValueError:
-                                    retry = datetime.now(timezone.utc) + timedelta(minutes=5)
-                            raise SourceError("SOURCE_RATE_LIMITED", retry)
-                        if response.status_code == 401 and not landing and attempt == 0:
-                            await self.initialize()
-                            break
-                        if response.status_code >= 500 and attempt == 0:
-                            break
-                        if response.status_code != 200:
-                            raise SourceError(f"SOURCE_HTTP_{response.status_code}")
-                        data = bytearray()
-                        async for part in response.aiter_bytes():
-                            data.extend(part)
-                            if len(data) > 10_000_000:
-                                raise SourceError("SOURCE_FILE_TOO_LARGE")
-                        if not landing and b"access denied" in bytes(data[:1000]).lower():
-                            raise SourceError("SOURCE_ACCESS_BLOCKED")
-                        return bytes(data)
-            except httpx.HTTPError as exc:
-                if attempt:
-                    raise SourceError("SOURCE_UNAVAILABLE") from exc
-            await asyncio.sleep(0.3)
-        raise SourceError("SOURCE_UNAVAILABLE")
 
 
 def bse_csv(content):
@@ -119,6 +44,7 @@ def bse_csv(content):
     if re.search(r"<\s*(?:html|!doctype)", text, re.I):
         raise SourceError("SOURCE_INVALID_DISCOVERY")
     rows = []
+    header_seen = False
     for row in csv.reader(io.StringIO(text)):
         if not row or not any(v.strip() for v in row):
             continue
@@ -128,6 +54,7 @@ def bse_csv(content):
             "scrip cd",
             "security code",
         ):
+            header_seen = True
             continue
         if len(row) != 5 or not re.fullmatch(r"[0-9]{6}", row[0].strip()):
             raise SourceError("SOURCE_INVALID_DISCOVERY")
@@ -149,7 +76,7 @@ def bse_csv(content):
                 "source_url": BSE_TODAY,
             }
         )
-    if not rows:
+    if not rows and not header_seen:
         raise SourceError("SOURCE_EMPTY_UNVERIFIED")
     return rows
 
