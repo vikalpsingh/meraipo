@@ -183,9 +183,12 @@ class MarketConfigurationInput(Input):
     market_scheduler_driver: Literal["celery", "vercel"]
     exchange_direct_enabled: bool
     nse_subscription_categories_enabled: bool
-    ipo_data_provider: Literal["exchange", "ipoalerts", "feed"]
+    ipo_data_provider: Literal["exchange", "ipoalerts", "ipoweb", "feed"]
     ipoalerts_api_key: str | None = Field(None, max_length=500)
     clear_ipoalerts_api_key: bool = False
+    ipoweb_sources: list[Literal["nse", "bse", "ipowatch"]] = Field(
+        default_factory=lambda: ["nse", "bse", "ipowatch"], min_length=1, max_length=3
+    )
     ipoalerts_page_size: int = Field(ge=1, le=100)
     market_feeds_json: str = Field(max_length=100000)
     exchange_sources_json: str = Field(max_length=100000)

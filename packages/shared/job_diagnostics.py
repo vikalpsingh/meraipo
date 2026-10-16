@@ -1,6 +1,13 @@
 """Safe, actionable operator guidance; never include credentials or raw responses."""
 
 GUIDANCE = {
+    "IPOWEB_IDENTITY_REVIEW_REQUIRED": "An existing issuer has a similar identity but its bidding dates or board cannot be matched safely. Review identifiers and dates before retrying; no duplicate company was created.",
+    "IPOWEB_SCHEMA_CHANGED": "IPOWatch did not return a recognized non-empty IPO table. Previous published data is retained; review the source layout.",
+    "IPOWEB_INVALID_ROW": "A web IPO row has invalid dates, prices or company links. Review the retained source; missing values were not converted to zero.",
+    "IPOWEB_ACCESS_DISALLOWED": "The source robots policy disallows collection. Disable IPOWatch in IPOWEB sources and use official exchange sources.",
+    "IPOWEB_ROBOTS_UNAVAILABLE": "Could not verify the source robots policy. Collection was skipped; existing data is retained.",
+    "IPOWEB_SOURCE_UNAVAILABLE": "This IPOWEB source failed. Other enabled sources continue and published data is retained.",
+    "IPOWEB_TIME_BUDGET": "IPOWEB reached its collection budget. Completed source batches are retained; retry remaining sources.",
     "SOURCE_HTTP_403": "The source returned HTTP 403. Inspect the financial-results stage diagnostics and reference ID. Do not repeatedly retry denials; use an approved official company source or manual upload.",
     "SOURCE_HTTP_406": "The source returned HTTP 406. Inspect request-stage diagnostics and the response excerpt; review supported request headers with the source operator.",
     "SOURCE_TIMEOUT": "The source exceeded the bounded request deadline. Review its stage and elapsed time; completed company checkpoints are retained.",

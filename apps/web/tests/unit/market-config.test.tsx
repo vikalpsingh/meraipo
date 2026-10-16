@@ -60,3 +60,28 @@ it('masks a configured API key and saves market settings', async () => {
   });
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 });
+
+it('selects IPOWEB sources and can switch back to IPOAlerts without replacing the key', async () => {
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(new Response(JSON.stringify(config), { status: 200 }))
+    .mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ ...config, ipo_data_provider: 'ipoweb' }), { status: 200 }),
+    );
+  render(<MarketConfig csrf="csrf-token" />);
+  const selector = await screen.findByLabelText('IPO data provider');
+  fireEvent.change(selector, { target: { value: 'ipoweb' } });
+  fireEvent.click(screen.getByLabelText('BSE'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save configuration' }));
+  await screen.findByText(/New job runs will use these values/);
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
+    ipo_data_provider: 'ipoweb',
+    ipoweb_sources: ['nse', 'ipowatch'],
+    ipoalerts_api_key: null,
+  });
+  fireEvent.change(selector, { target: { value: 'ipoalerts' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save configuration' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).ipo_data_provider).toBe('ipoalerts');
+});

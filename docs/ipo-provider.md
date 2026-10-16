@@ -108,3 +108,72 @@ schedule entries and no browser runtime errors or horizontal overflow.
 
 The configured key is not recorded in this document. This deployment was verified
 on the local Docker site; a public HTTPS production deployment is a separate operation.
+
+## IPOAlerts plan rejection investigation — 2026-10-15
+
+Reported production run: `3cccf710-a946-455e-87ef-e5b93499cbdd`, 2026-10-14 23:00 IST.
+The historical `IPOALERTS_HTTP_ERROR` discarded HTTP status/body, so the original
+response cannot be reconstructed from that error alone. Local Docker was unable
+to start; the production run/database and active production key were not verified.
+
+Read-only requests using the locally configured key reproduced:
+- `includeGmp=true`, limit 3: HTTP 400, `ERR:PRMFBNGMP` (GMP not enabled for plan).
+- No GMP, limit 3: HTTP 400, `Limit must be less than or equal to 1`.
+- No GMP, limit 1: HTTP 200; nine open IPOs, nine pages, one record returned.
+
+The adapter now handles only these explicit restrictions with bounded, paced
+retries. The allowed page size and GMP exclusion persist across subsequent pages
+within the run. GMP unavailability remains a job error (partial status), while
+complete IPO status batches can publish. Existing GMP quotes are retained.
+Unknown HTTP rejections retain status and safe request context in job details;
+headers, credentials, and arbitrary upstream error text are not persisted.
+
+Provider contract: https://ipoalerts.in/docs/api-reference/endpoints/get-all-ipos
+GMP requires the Pro plan and GMP add-on. Provider plan changes are external;
+this patch cannot enable GMP entitlement. Existing pagination/time-budget guards
+still apply, particularly for large catalogues on a one-record-per-page plan.
+
+Deployment and production rerun require a working Docker engine and verification
+of production configuration. A successful single live page is not evidence that
+the full production catalogue was imported.
+
+## IPOWEB provider (2026-10-16)
+
+IPOWEB brings the trading app's NSE + IPOWatch discovery approach into MeraIPO;
+it does not import MeraIPO's own website. It also reuses the existing BSE IPO
+parser. MeraAdmin → Data and scheduler → Market data configuration provides a
+single active IPO provider and individual NSE/BSE/IPOWatch source toggles.
+Select IPOWEB and save; select IPOAlerts later to restore that provider without
+removing its encrypted key or existing companies. IPOWEB is the default for new
+configuration and the local environment. Existing saved database configuration
+takes precedence and must be changed in MeraAdmin after deployment.
+
+Official rows retain NSE/BSE provenance; IPOWatch rows are UNOFFICIAL and marked
+unverified. Stable source IDs and exchange identifiers are used first. Across
+providers, exact normalized issuer names require matching opening/closing dates
+and compatible boards. Ambiguous or undated matches are rejected for review,
+not inserted as another company. Source failures leave published rows intact.
+
+The trading app guesses symbols from company words; this adapter deliberately
+does not. Missing issue size, lot size and prices remain missing. The current
+IPOWatch table does not include issue size/lot size, so these need an exchange
+feed or subsequent enrichment. GMP is not published from this table because it
+has no explicit quote observation timestamp; ingestion time is not quote time.
+
+Verification: nine focused backend tests (including staging/public catalog,
+repeat imports, provider switching and conflict rejection), two MeraAdmin UI
+tests, TypeScript check. Full suite intentionally not run. A separate read-only
+live IPOWatch probe respected robots policy and parsed 11 records with zero
+rejected rows; it did not write the database. Docker was subsequently started and the local stack rebuilt/deployed. IPOWEB
+was enabled in saved market configuration with an audit record; the existing
+API key was preserved. A database backup is retained in ignored work/. Public
+remote production deployment is not implied by this local verification.
+
+Live sync run `7f5ce356-9066-491e-bac1-cbfec1f3a6ae` completed PARTIAL with
+32 fetched, 25 written, 2 unchanged and 6 failures; conflicting records remain
+held for review rather than overwriting existing published values.
+Final database verification: 14 IPOs are attributed to IPOWEB; company count rose
+from 74 to 79 (five new companies). BSE returned HTTP 403. Four IPOWatch rows
+(Jio Platforms, Bonfiglioli Transmissions, Fusion CX, HD Fire Protect) conflicted
+with stored values and were retained for review. Paras Healthcare required
+identity review. These exceptions did not erase published company data.

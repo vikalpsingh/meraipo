@@ -14,6 +14,7 @@ class IPOBatch:
     raw: str
     records: list
     errors: list
+    authority: str | None = None
 
 
 class IPOProvider(Protocol):
@@ -26,6 +27,11 @@ class IPOProvider(Protocol):
 def get_ipo_provider(config) -> IPOProvider:
     from packages.providers.ipoalerts import IPOAlerts
 
+    if config.ipo_data_provider == "ipoweb":
+        from packages.providers.ipoweb import IPOWeb
+
+        return IPOWeb(config.ipoweb_sources)
+
     adapters = {"ipoalerts": IPOAlerts}
     return adapters[config.ipo_data_provider](
         config.ipoalerts_api_key.get_secret_value(), page_size=config.ipoalerts_page_size
@@ -33,4 +39,4 @@ def get_ipo_provider(config) -> IPOProvider:
 
 
 def primary_ipo_provider(config):
-    return {"ipoalerts": "IPOALERTS"}.get(config.ipo_data_provider)
+    return {"ipoalerts": "IPOALERTS", "ipoweb": "IPOWEB"}.get(config.ipo_data_provider)

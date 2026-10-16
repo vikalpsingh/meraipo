@@ -20,6 +20,18 @@ STATUSES = ("open", "upcoming", "announced")
 EMPTY = (None, "", "-", "–", "—")
 
 
+class IPOAlertsHTTPError(FeedError):
+    def __init__(self, status, params):
+        super().__init__("IPOALERTS_HTTP_ERROR")
+        # Only known request fields: never persist headers or arbitrary upstream text.
+        self.detail = (
+            f"IPOAlerts HTTP {status}; status={params.get('status')}, "
+            f"page={params.get('page')}, limit={params.get('limit')}, "
+            f"includeGmp={params.get('includeGmp', 'false')}. "
+            "Check provider plan access and request parameters. Published data is retained."
+        )
+
+
 def optional_day(value):
     return None if value in EMPTY else date.fromisoformat(value).isoformat()
 
@@ -155,6 +167,8 @@ class IPOAlerts:
     def __init__(self, key, *, page_size=3, transport=None, sleep=asyncio.sleep):
         self.key, self.transport, self.sleep = key, transport, sleep
         self.page_size = page_size
+        self.include_gmp = True
+        self.plan_errors = []
 
     async def request(self, client, params, deadline):
         for attempt in range(3):
@@ -169,8 +183,6 @@ class IPOAlerts:
                         raise FeedError("IPOALERTS_RATE_LIMITED")
                     if status >= 500:
                         raise httpx.TransportError("Upstream unavailable")
-                    if status != 200:
-                        raise FeedError("IPOALERTS_HTTP_ERROR")
                     chunks, size = [], 0
                     async for chunk in response.aiter_bytes():
                         size += len(chunk)
@@ -178,6 +190,36 @@ class IPOAlerts:
                             raise FeedError("IPOALERTS_PAYLOAD_TOO_LARGE")
                         chunks.append(chunk)
                     raw = b"".join(chunks).decode("utf-8")
+                    if status != 200:
+                        # Negotiate only explicit, recognized plan restrictions. Never
+                        # treat arbitrary 400s or authentication failures as empty data.
+                        try:
+                            detail = json.loads(raw).get("detail", "")
+                        except (ValueError, AttributeError):
+                            detail = ""
+                        if not isinstance(detail, str):
+                            detail = ""
+                        if status == 400 and "ERR:PRMFBNGMP" in detail and self.include_gmp:
+                            self.include_gmp = False
+                            params.pop("includeGmp", None)
+                            self.plan_errors.append(("gmp:plan", "IPOALERTS_GMP_NOT_ENABLED"))
+                        elif (
+                            status == 400
+                            and (
+                                match := re.fullmatch(
+                                    r"Limit must be less than or equal to (\d+)", detail
+                                )
+                            )
+                            and 1 <= int(match[1]) < params["limit"]
+                        ):
+                            self.page_size = int(match[1])
+                            params["limit"] = self.page_size
+                        else:
+                            raise IPOAlertsHTTPError(status, params)
+                        if attempt == 2:
+                            raise IPOAlertsHTTPError(status, params)
+                        await self.sleep(10.1)
+                        continue
                 try:
                     body = json.loads(raw)
                     meta, rows = body["meta"], body["ipos"]
@@ -228,14 +270,15 @@ class IPOAlerts:
                             "status": status,
                             "page": page,
                             "limit": self.page_size,
-                            "includeGmp": "true",
+                            **({"includeGmp": "true"} if self.include_gmp else {}),
                         },
                         deadline,
                     )
                     if total is not None and total != (meta["count"], meta["totalPages"]):
                         raise FeedError("IPOALERTS_PAGINATION_CHANGED")
                     total = (meta["count"], meta["totalPages"])
-                    records, errors = [], []
+                    records, errors = [], self.plan_errors[:]
+                    self.plan_errors.clear()
                     for row in rows:
                         key = str(row.get("id", "")) if isinstance(row, dict) else ""
                         if not key or key in seen:

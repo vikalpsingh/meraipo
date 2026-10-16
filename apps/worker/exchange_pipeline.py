@@ -49,7 +49,7 @@ PIPELINE_JOBS = {
 }
 PIPELINE_JOBS.update(
     {
-        name: (label, "Configurable · IST", [kind])
+        name: (label, "Configurable Â· IST", [kind])
         for name, (label, kind, _) in EXCHANGE_JOBS.items()
     }
 )
@@ -71,10 +71,12 @@ async def raw_payload(db, provider, kind, url, raw):
 
 
 def error(db, run, provider, item, exc):
+    from packages.providers.ipoalerts import IPOAlertsHTTPError
     from packages.shared.job_diagnostics import GUIDANCE
 
     code = str(exc) if isinstance(exc, FeedError) else type(exc).__name__
     guidance = {
+        "IPOALERTS_GMP_NOT_ENABLED": "IPOAlerts rejected includeGmp because this plan has no GMP add-on (ERR:PRMFBNGMP). IPO collection continues without GMP. Enable the provider GMP add-on to resume GMP updates; existing quotes are retained.",
         "IPOALERTS_AUTH_FAILED": "IPOAlerts rejected the API key (401/403). Set a valid IPOALERTS_API_KEY on the backend and restart API/worker/scheduler. Existing data is retained.",
         "IPOALERTS_KEY_REQUIRED": "Set IPOALERTS_API_KEY on the backend; preview access is not a complete market feed.",
         "IPOALERTS_INCOMPLETE_ACCESS": "IPOAlerts returned restricted preview data. Verify API key and plan access; this response was not published.",
@@ -111,7 +113,9 @@ def error(db, run, provider, item, exc):
             provider=provider,
             item=item[:200],
             code=code[:80],
-            detail=guidance.get(
+            detail=exc.detail
+            if isinstance(exc, IPOAlertsHTTPError)
+            else guidance.get(
                 code,
                 "Collection/publication rejected; last published data retained. Review source mapping and raw payload.",
             ),
@@ -176,7 +180,9 @@ async def store_batch(db, run, provider, authority, url, raw, records, errors, c
                 record_authority = (
                     "UNOFFICIAL"
                     if kind == "gmp"
-                    else "BSE" if provider == "NSE" and value.get("bse_symbol") else authority
+                    else "BSE"
+                    if provider == "NSE" and value.get("bse_symbol")
+                    else authority
                 )
                 changed = await stage(db, kind, value, provider, record_authority, payload.id)
                 counts["written" if changed else "unchanged"] += 1
@@ -237,7 +243,7 @@ async def collect(db, run, counts, download=ex.download):
             "requested_date": requested.isoformat(),
             "resolved_trade_date": today.isoformat(),
         }
-    if "ipos" in kinds and config.ipo_data_provider == "ipoalerts":
+    if "ipos" in kinds and config.ipo_data_provider in {"ipoalerts", "ipoweb"}:
         from packages.providers.ipo import get_ipo_provider
 
         provider = get_ipo_provider(config)
@@ -247,7 +253,7 @@ async def collect(db, run, counts, download=ex.download):
                     db,
                     run,
                     provider.name,
-                    provider.authority,
+                    batch.authority or provider.authority,
                     batch.url,
                     batch.raw,
                     batch.records,
@@ -350,7 +356,9 @@ async def collect(db, run, counts, download=ex.download):
                 error(db, run, source.name, source.kind, exc)
     # Existing approved feeds remain useful for unofficial GMP and optional provider mappings.
     for kind, providers in configuration(config.market_feeds_json).items():
-        if kind not in kinds or (kind == "ipos" and config.ipo_data_provider == "ipoalerts"):
+        if kind not in kinds or (
+            kind == "ipos" and config.ipo_data_provider in {"ipoalerts", "ipoweb"}
+        ):
             continue
         for name, source in providers.items():
             if not source.enabled:
@@ -572,7 +580,10 @@ async def publish(db, run, counts):
         primary = primary_ipo_provider(settings())
         if row.kind == "ipos" and (
             (primary and row.provider != primary)
-            or (settings().ipo_data_provider == "exchange" and row.provider == "IPOALERTS")
+            or (
+                settings().ipo_data_provider == "exchange"
+                and row.provider in {"IPOALERTS", "IPOWEB"}
+            )
         ):
             row.status, row.published_at = "FALLBACK_NOT_NEEDED", m.now()
             counts["unchanged"] += 1
@@ -765,7 +776,9 @@ async def run_pipeline(db, run, download=None):
         run.status = (
             ("PARTIAL" if counts["providers"] else "FAILED")
             if counts["failed"]
-            else "SUCCESS" if counts["providers"] else "SKIPPED"
+            else "SUCCESS"
+            if counts["providers"]
+            else "SKIPPED"
         )
         await db.flush()
         last_error = await db.scalar(

@@ -19,6 +19,7 @@ EDITABLE_FIELDS = (
     "exchange_direct_enabled",
     "nse_subscription_categories_enabled",
     "ipo_data_provider",
+    "ipoweb_sources",
     "ipoalerts_page_size",
     "exchange_sources_json",
     "bse_ipo_issues_json",

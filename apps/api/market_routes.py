@@ -285,6 +285,18 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         for kind, group in feeds.items()
         for name, c in group.items()
     ]
+    if config.ipo_data_provider == "ipoweb":
+        providers = [p for p in providers if p["kind"] != "ipos"]
+        providers.extend(
+            {
+                "kind": "ipos",
+                "name": "IPOWEB / " + source.upper(),
+                "authority": "UNOFFICIAL" if source == "ipowatch" else source.upper(),
+                "enabled": True,
+                "credential_set": False,
+            }
+            for source in config.ipoweb_sources
+        )
     if config.ipo_data_provider == "ipoalerts":
         providers = [p for p in providers if p["kind"] != "ipos"]
         providers.append(
@@ -411,13 +423,13 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             {
                 "label": "BSE category subscriptions",
                 "ready": bool(bse_issues),
-                "setting": "Config · BSE IPO issue mappings · match each cumulative-demand issue ID to an exact company identifier",
+                "setting": "Config Â· BSE IPO issue mappings Â· match each cumulative-demand issue ID to an exact company identifier",
             },
             {
                 "label": "Quarterly source mapping",
                 "ready": any(s.kind == "results" and s.concepts for s in native)
                 or any(c.enabled for c in feeds.get("results", {}).values()),
-                "setting": "Config · Exchange sources JSON · verified discovery fields and exact XBRL concept names",
+                "setting": "Config Â· Exchange sources JSON Â· verified discovery fields and exact XBRL concept names",
             },
             {
                 "label": "Cron authentication",
@@ -428,17 +440,17 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
             {
                 "label": "Provider feeds",
                 "ready": config.exchange_direct_enabled or any(p["enabled"] for p in providers),
-                "setting": "Config · enable direct exchanges or define licensed feeds",
+                "setting": "Config Â· enable direct exchanges or define licensed feeds",
             },
             {
                 "label": "Trading calendar",
                 "ready": config.trading_calendar_year == date.today().year,
-                "setting": "Config · trading calendar year and holiday dates",
+                "setting": "Config Â· trading calendar year and holiday dates",
             },
             {
                 "label": "Scheduled execution",
                 "ready": config.market_scheduler_enabled,
-                "setting": "Config · enable scheduled jobs after provider setup",
+                "setting": "Config Â· enable scheduled jobs after provider setup",
             },
         ],
         "configuration_error": config_error,

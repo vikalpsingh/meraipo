@@ -410,3 +410,56 @@ async def test_screener_feed_link_is_saved_and_missing_feed_preserves_it(db):
         await db.flush()
         company = await db.scalar(select(m.Company).where(m.Company.slug == item["slug"]))
         assert company.screener_url == "https://www.screener.in/company/FIXTURE/consolidated/"
+
+
+async def test_plan_restrictions_recover_ipo_collection_without_hiding_gmp_failure():
+    requests = []
+
+    def handler(request):
+        params = dict(request.url.params)
+        requests.append(params)
+        if params.get("includeGmp"):
+            return httpx.Response(400, json={"detail": "Not enabled (ERR:PRMFBNGMP)"})
+        if int(params["limit"]) > 1:
+            return httpx.Response(400, json={"detail": "Limit must be less than or equal to 1"})
+        return httpx.Response(
+            200,
+            json={
+                "meta": {"count": 0, "countOnPage": 0, "totalPages": 0, "page": 1, "limit": 1},
+                "ipos": [],
+            },
+        )
+
+    batches = [
+        batch
+        async for batch in IPOAlerts(
+            "test-secret", transport=httpx.MockTransport(handler), sleep=no_sleep
+        ).batches(time.monotonic() + 60)
+    ]
+    assert len(batches) == 3
+    assert batches[0].errors == [("gmp:plan", "IPOALERTS_GMP_NOT_ENABLED")]
+    assert not batches[1].errors and not batches[2].errors
+    assert len(requests) == 5
+    assert all(p["limit"] == "1" and "includeGmp" not in p for p in requests[2:])
+
+
+async def test_http_rejection_diagnostics_persist_without_provider_secrets(db):
+    from apps.worker.exchange_pipeline import error as record_error
+
+    provider = IPOAlerts(
+        "test-secret",
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(422, json={"detail": "test-secret private body"})
+        ),
+        sleep=no_sleep,
+    )
+    with pytest.raises(FeedError) as caught:
+        _ = [batch async for batch in provider.batches(time.monotonic() + 60)]
+    run = await create_run(db, "sync-ipos", "manual")
+    record_error(db, run, "IPOALERTS", "ipos", caught.value)
+    await db.flush()
+    recorded = await db.scalar(select(m.JobError).where(m.JobError.run_id == run.id))
+    assert recorded.code == "IPOALERTS_HTTP_ERROR"
+    assert "HTTP 422" in recorded.detail and "status=open" in recorded.detail
+    assert "page=1" in recorded.detail and "limit=3" in recorded.detail
+    assert "test-secret" not in recorded.detail and "private body" not in recorded.detail

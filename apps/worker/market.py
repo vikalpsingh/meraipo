@@ -40,7 +40,7 @@ JOBS = {
     ),
     "backfill": (
         "Historical backfill",
-        "Manual · one company, one year per request",
+        "Manual Â· one company, one year per request",
         ["prices", "results"],
     ),
 }
@@ -111,6 +111,40 @@ async def match_company(db, data):
                 matches.add(candidate.id)
     if len(matches) > 1:
         raise FeedError("IDENTIFIER_CONFLICT")
+    if not matches and hasattr(data, "issue"):
+        from packages.providers.ipoweb import company_key
+
+        # IPOWEB has no invented exchange tickers. Cross-provider bridging needs
+        # an exact normalized issuer, compatible board and identical dated window.
+        candidates = (
+            await db.execute(
+                select(m.Company, m.IPO, m.IPODate)
+                .join(m.IPO, m.IPO.company_id == m.Company.id)
+                .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+            )
+        ).all()
+        possible = []
+        for candidate, ipo, dates in candidates:
+            if (
+                data.provider_namespace == "IPOWEB" or ipo.source_provider == "IPOWEB"
+            ) and company_key(candidate.name) == company_key(data.issue.name):
+                possible.append((candidate, dates))
+        if possible:
+            compatible = [
+                candidate
+                for candidate, dates in possible
+                if data.issue.open_date is not None
+                and data.issue.close_date is not None
+                and dates.open_date == data.issue.open_date
+                and dates.close_date == data.issue.close_date
+                and (
+                    candidate.board == data.issue.board
+                    or "Unknown" in (candidate.board, data.issue.board)
+                )
+            ]
+            if len(possible) != 1 or len(compatible) != 1:
+                raise FeedError("IPOWEB_IDENTITY_REVIEW_REQUIRED")
+            matches.add(compatible[0].id)
     company = await db.get(m.Company, next(iter(matches))) if matches else None
     if company and data.isin and company.isin and company.isin != data.isin:
         raise FeedError("IDENTIFIER_CONFLICT")
@@ -165,7 +199,12 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
             from packages.providers.ipo import primary_ipo_provider
 
             selected_primary = primary_ipo_provider(settings()) == provider
-            if ipo.source_provider != provider and not selected_primary:
+            protect_official = (
+                provider == "IPOWEB"
+                and authority not in {"NSE", "BSE"}
+                and ipo.quality == "VERIFIED"
+            )
+            if (ipo.source_provider != provider and not selected_primary) or protect_official:
                 for key in (
                     "price_low",
                     "price_high",
@@ -198,7 +237,9 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
                     "provider": provider,
                     "source_url": data.source_url,
                     "source_timestamp": data.source_timestamp,
-                    "verification_status": "UNVERIFIED" if authority == "LICENSED" else "VERIFIED",
+                    "verification_status": "UNVERIFIED"
+                    if authority not in {"NSE", "BSE"}
+                    else "VERIFIED",
                     "baseline": None,
                     "ticker": None,
                 }
@@ -233,7 +274,9 @@ async def ingest_record(db, kind, data, provider, authority, raw_id):
                 update={
                     "provider": provider,
                     "source_url": data.source_url,
-                    "verification_status": "UNVERIFIED" if authority == "LICENSED" else "VERIFIED",
+                    "verification_status": "UNVERIFIED"
+                    if authority not in {"NSE", "BSE"}
+                    else "VERIFIED",
                     "ticker": None,
                 }
             )
@@ -659,7 +702,9 @@ async def run_job(db, run, fetch=fetch_feed):
         run.status = (
             ("PARTIAL" if counters["providers"] else "FAILED")
             if counters["failed"]
-            else "SUCCESS" if counters["providers"] else "SKIPPED"
+            else "SUCCESS"
+            if counters["providers"]
+            else "SKIPPED"
         )
         if notes and run.status == "SUCCESS":
             run.status = "PARTIAL"

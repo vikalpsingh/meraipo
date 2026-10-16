@@ -10,9 +10,10 @@ type Config = {
   market_scheduler_driver: 'celery' | 'vercel';
   exchange_direct_enabled: boolean;
   nse_subscription_categories_enabled: boolean;
-  ipo_data_provider: 'exchange' | 'ipoalerts' | 'feed';
+  ipo_data_provider: 'exchange' | 'ipoalerts' | 'ipoweb' | 'feed';
   ipoalerts_api_key_configured: boolean;
   ipoalerts_page_size: number;
+  ipoweb_sources?: string[];
   market_feeds_json: string;
   exchange_sources_json: string;
   bse_ipo_issues_json: string;
@@ -51,6 +52,7 @@ export function MarketConfig({ csrf }: { csrf: string }) {
       exchange_direct_enabled: form.has('exchange_direct_enabled'),
       nse_subscription_categories_enabled: form.has('nse_subscription_categories_enabled'),
       ipo_data_provider: form.get('ipo_data_provider'),
+      ipoweb_sources: form.getAll('ipoweb_sources'),
       ipoalerts_api_key: form.get('ipoalerts_api_key') || null,
       clear_ipoalerts_api_key: form.has('clear_ipoalerts_api_key'),
       ipoalerts_page_size: Number(form.get('ipoalerts_page_size')),
@@ -100,6 +102,30 @@ export function MarketConfig({ csrf }: { csrf: string }) {
       <form className="admin-form" onSubmit={save}>
         <fieldset>
           <legend>Provider selection</legend>
+          <p>
+            Select one active IPO provider. Switch back to IPOAlerts here without deleting existing
+            company data or its saved API key.
+          </p>
+          <fieldset>
+            <legend>IPOWEB sources</legend>
+            <p>
+              Official exchange data takes priority. IPOWatch discoveries remain unverified. Failed
+              sources retain previously published records.
+            </p>
+            {['nse', 'bse', 'ipowatch'].map((source) => (
+              <label className="inline-check" key={source}>
+                <input
+                  type="checkbox"
+                  name="ipoweb_sources"
+                  value={source}
+                  defaultChecked={(config.ipoweb_sources || ['nse', 'bse', 'ipowatch']).includes(
+                    source,
+                  )}
+                />
+                {source === 'ipowatch' ? 'IPOWatch upcoming IPO table' : source.toUpperCase()}
+              </label>
+            ))}
+          </fieldset>
           <div className="form-grid">
             <label>
               Provider mode
@@ -111,6 +137,7 @@ export function MarketConfig({ csrf }: { csrf: string }) {
             <label>
               IPO data provider
               <select name="ipo_data_provider" defaultValue={config.ipo_data_provider}>
+                <option value="ipoweb">IPOWEB — exchange and web sources</option>
                 <option value="ipoalerts">IPOAlerts</option>
                 <option value="exchange">NSE/BSE directly</option>
                 <option value="feed">Configured feed</option>

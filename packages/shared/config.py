@@ -38,8 +38,11 @@ class Settings(BaseSettings):
     market_scheduler_enabled: bool = False
     exchange_direct_enabled: bool = False
     nse_subscription_categories_enabled: bool = True
-    ipo_data_provider: Literal["exchange", "ipoalerts", "feed"] = "exchange"
+    ipo_data_provider: Literal["exchange", "ipoalerts", "ipoweb", "feed"] = "ipoweb"
     ipoalerts_api_key: SecretStr = SecretStr("")
+    ipoweb_sources: list[Literal["nse", "bse", "ipowatch"]] = Field(
+        default_factory=lambda: ["nse", "bse", "ipowatch"], min_length=1, max_length=3
+    )
     ipoalerts_page_size: int = Field(default=3, ge=1, le=100)
     exchange_sources_json: str = "[]"
     bse_ipo_issues_json: str = "[]"
