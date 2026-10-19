@@ -1,3 +1,4 @@
+import { gmpPresentation } from '@/lib/gmp-presentation';
 import { indiaDay } from '@/lib/applicant';
 import { ipoStatus } from '@/lib/ipo-status';
 import Image from 'next/image';
@@ -73,8 +74,9 @@ export function Trust({ company }: { company: Company }) {
 }
 export function IPOCard({ company: c, today = indiaDay() }: { company: Company; today?: string }) {
   const status = ipoStatus(c, today);
+  const gmp = gmpPresentation(c);
   return (
-    <article className={`ipo-card ipo-tone-${status.tone}`}>
+    <article className={`ipo-card ipo-tone-${status.tone} ipo-gmp--${gmp.tone}`}>
       <div className="card-top">
         <span className={`ipo-status ipo-tone-${status.tone}`}>{status.label}</span>
         <Trust company={c} />
@@ -131,7 +133,7 @@ export function IPOCard({ company: c, today = indiaDay() }: { company: Company; 
             {c.gmp === null ? 'Not available' : timestamp(c.gmp_timestamp)}
           </small>
         </span>
-        <b>{c.gmp === null ? 'GMP unavailable' : `${money(c.gmp)} (${percent(c.gmp_percent)})`}</b>
+        <b>{c.gmp === null ? 'GMP unavailable' : `${money(c.gmp)} (${percent(gmp.value)})`}</b>
       </div>
       <details>
         <summary>Issue details</summary>

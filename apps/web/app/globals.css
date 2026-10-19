@@ -2006,17 +2006,24 @@ body:has(.company-preview[open]) {
 }
 
 /* Carry the GMP bands across the row; green shades keep black text readable. */
-.ipo-interest-table .ipo-gmp--neutral {
+.ipo-interest-table .ipo-gmp--neutral,
+.ipo-card.ipo-gmp--neutral {
   --gmp-row-background: #ffffff;
 }
-.ipo-interest-table .ipo-gmp--light-green {
+.ipo-interest-table .ipo-gmp--light-green,
+.ipo-card.ipo-gmp--light-green {
   --gmp-row-background: #dcfce7;
 }
-.ipo-interest-table .ipo-gmp--dark-green {
+.ipo-interest-table .ipo-gmp--dark-green,
+.ipo-card.ipo-gmp--dark-green {
   --gmp-row-background: #86efac;
 }
-.ipo-interest-table .ipo-gmp--gold {
+.ipo-interest-table .ipo-gmp--gold,
+.ipo-card.ipo-gmp--gold {
   --gmp-row-background: #f5cf62;
+}
+.ipo-card {
+  background: var(--gmp-row-background, #ffffff);
 }
 .ipo-interest-table .ipo-row > td {
   background: var(--gmp-row-background);

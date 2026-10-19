@@ -1,3 +1,4 @@
+import { IPOCard } from '@/components/content';
 import { render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { IPOInterestTable } from '@/components/ipo-interest-table';
@@ -60,4 +61,37 @@ it.each([
   expect(screen.getByRole('columnheader', { name: 'GMP %' })).toBeInTheDocument();
   const row = screen.getAllByRole('row')[1];
   expect(within(row).getAllByRole('cell').at(-1)).toHaveTextContent(expected);
+});
+
+it.each([
+  [130, 586, 'light-green'],
+  [515, 700, 'dark-green'],
+  [101, 100, 'gold'],
+  [20, 100, 'neutral'],
+  [null, 100, 'neutral'],
+  [50, null, 'neutral'],
+])('mobile card uses the same GMP band for %s / %s', (gmp, price_high, tone) => {
+  const company = {
+    id: 'mobile',
+    slug: 'mobile',
+    name: 'Mobile fixture',
+    board: 'Mainboard',
+    status: 'OPEN',
+    open_date: '2026-10-15',
+    close_date: '2026-10-19',
+    price_low: 100,
+    price_high,
+    gmp,
+    gmp_percent: 999,
+    gmp_quality: 'STALE',
+    gmp_timestamp: '2026-10-18T17:25:00Z',
+    lot_size: 25,
+    minimum_application: null,
+    issue_size: null,
+  } as Company;
+  render(<IPOCard company={company} today="2026-10-19" />);
+  expect(screen.getByRole('article')).toHaveClass(`ipo-gmp--${tone}`, 'ipo-tone-closing');
+  expect(screen.getByText('Closing today')).toBeInTheDocument();
+  expect(screen.getByText(/^Stale ·/)).toBeInTheDocument();
+  expect(screen.getByRole('article').querySelector('.gmp b')).not.toHaveTextContent('999');
 });
