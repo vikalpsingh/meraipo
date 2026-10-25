@@ -5,7 +5,6 @@ import type { Company, SiteMessage, Advertisement } from '@/lib/types';
 import { IPOCard, Message, Ads } from '@/components/content';
 import { TodayActions } from '@/components/applicant-guide';
 import { IPOInterestTable } from '@/components/ipo-interest-table';
-import { IPOStageTabs } from '@/components/ipo-stage-tabs';
 import { IPOSearch } from '@/components/ipo-search';
 import { indiaDay } from '@/lib/applicant';
 export const dynamic = 'force-dynamic';
@@ -134,21 +133,7 @@ export default async function Home({
           </Link>
         </section>
       )}
-      {query ? (
-        matches.filter(([, items]) => items.length).map(renderSection)
-      ) : (
-        <>
-          <IPOStageTabs
-            stages={matches.slice(0, 3).map((section) => ({
-              id: section[2],
-              title: section[0],
-              count: section[1].length,
-              content: renderSection(section),
-            }))}
-          />
-          {matches.slice(3).map(renderSection)}
-        </>
-      )}
+      {(query ? matches.filter(([, items]) => items.length) : matches).map(renderSection)}
       <p className="gmp-disclaimer">
         Unofficial grey-market information. GMP does not guarantee listing price or investment
         return.

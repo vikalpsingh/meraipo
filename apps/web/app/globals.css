@@ -242,6 +242,86 @@ h2 {
   color: white;
   border-color: var(--primary);
 }
+.broker-shortcuts.panel {
+  padding: 16px;
+  margin-bottom: 24px;
+}
+.broker-shortcuts-intro h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+.broker-shortcuts-intro p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #49606f;
+}
+.broker-shortcuts-links {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.broker-shortcut.outline-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 12px;
+  white-space: normal;
+  background: #fff;
+}
+.broker-shortcut:hover {
+  background: #edf5f3;
+  border-color: var(--primary);
+}
+.broker-shortcut:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+.broker-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+  background: #edf2f4;
+  border-radius: 5px;
+}
+.broker-icon img {
+  object-fit: contain;
+}
+.broker-shortcut-name {
+  flex: 1;
+  min-width: 0;
+}
+.broker-shortcut-name small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: #49606f;
+}
+.broker-shortcut > svg {
+  flex-shrink: 0;
+}
+@media (max-width: 760px) {
+  .broker-shortcuts-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .broker-shortcut.outline-button {
+    gap: 6px;
+    padding: 10px 8px;
+    font-size: 13px;
+  }
+  .broker-icon {
+    flex-basis: 24px;
+    width: 24px;
+    height: 24px;
+  }
+  .broker-icon img {
+    width: 24px;
+    height: 24px;
+  }
+}
 .stats {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1.6fr;
