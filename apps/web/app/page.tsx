@@ -1,3 +1,4 @@
+import { BrokerShortcuts } from '@/components/broker-shortcuts';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { features } from '@/lib/features';
@@ -81,6 +82,7 @@ export default async function Home({
   }
   return (
     <main className="ipo-home">
+      <BrokerShortcuts />
       <div className="page-heading">
         <div>
           <p className="eyebrow">THE PRIMARY MARKET</p>

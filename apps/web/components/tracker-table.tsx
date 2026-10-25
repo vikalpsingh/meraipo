@@ -1,3 +1,7 @@
+'use client';
+
+import { useLayoutEffect, useRef, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { Company } from '@/lib/types';
@@ -55,17 +59,36 @@ function Gain({ value }: { value: number | null | undefined }) {
   );
 }
 export function TrackerTable({ companies, query = '' }: { companies: Company[]; query?: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const tableScroll = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const saved = savedScroll.current;
+    if (!saved || pending) return;
+    if (tableScroll.current) {
+      tableScroll.current.scrollLeft = saved.left;
+      tableScroll.current.scrollTop = saved.top;
+    }
+    window.scrollTo({ left: saved.x, top: saved.y, behavior: 'instant' });
+    savedScroll.current = null;
+  }, [query, pending]);
   const params = new URLSearchParams(query);
   const sortKeys: Record<string, string> = {
     'Gain since IPO': 'return_ipo',
     'From recorded high': 'drawdown',
   };
-  const sortHref = (key: string) => {
+  const sortBy = (key: string) => {
     const next = new URLSearchParams(params);
     next.set('sort', key);
     next.set('order', params.get('sort') === key && params.get('order') !== 'asc' ? 'asc' : 'desc');
-    next.delete('page');
-    return '/tracker?' + next;
+    savedScroll.current = {
+      x: window.scrollX,
+      y: window.scrollY,
+      left: tableScroll.current?.scrollLeft || 0,
+      top: tableScroll.current?.scrollTop || 0,
+    };
+    startTransition(() => router.replace('/tracker?' + next, { scroll: false }));
   };
   const columns = [...research].sort(
     (a, b) => Number(companies.some(b.available)) - Number(companies.some(a.available)),
@@ -79,7 +102,14 @@ export function TrackerTable({ companies, query = '' }: { companies: Company[]; 
         this view. Light green rows indicate gains above 100%. Missing values sort last.
       </p>
       <div className="panel table-panel">
-        <div className="table-scroll" tabIndex={0} role="region" aria-label="IPO performance table">
+        <div
+          ref={tableScroll}
+          className="table-scroll"
+          aria-busy={pending}
+          tabIndex={0}
+          role="region"
+          aria-label="IPO performance table"
+        >
           <table className="data-table tracker-table">
             <thead>
               <tr>
@@ -108,7 +138,13 @@ export function TrackerTable({ companies, query = '' }: { companies: Company[]; 
                     }
                   >
                     {sortKeys[label] ? (
-                      <Link href={sortHref(sortKeys[label])} title="Click to change sort direction">
+                      <button
+                        type="button"
+                        className="tracker-sort-button"
+                        disabled={pending}
+                        onClick={() => sortBy(sortKeys[label])}
+                        title="Click to change sort direction"
+                      >
                         {label}
                         <span aria-hidden="true">
                           {' '}
@@ -118,7 +154,7 @@ export function TrackerTable({ companies, query = '' }: { companies: Company[]; 
                               : '↓'
                             : '↕'}
                         </span>
-                      </Link>
+                      </button>
                     ) : (
                       label
                     )}

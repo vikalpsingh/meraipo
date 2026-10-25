@@ -9,6 +9,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const routes = [
     '',
     ...(flags.ipo_tracker ? ['/tracker'] : []),
+    '/ipo-status',
     '/about',
     '/methodology',
     '/data-sources',

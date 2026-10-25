@@ -8,7 +8,6 @@ import { Ads } from '@/components/content';
 import { TrackerTable } from '@/components/tracker-table';
 import { TrackerPageSize } from '@/components/tracker-page-size';
 import { validTrackerPageSize } from '@/lib/tracker-pagination';
-import { BrokerShortcuts } from '@/components/broker-shortcuts';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'IPO Tracker', alternates: { canonical: '/tracker' } };
 const views = [
@@ -45,7 +44,6 @@ export default async function Tracker({
   };
   return (
     <main>
-      <BrokerShortcuts />
       <div className="page-heading">
         <div>
           <p className="eyebrow">THE LONG-TERM VIEW</p>

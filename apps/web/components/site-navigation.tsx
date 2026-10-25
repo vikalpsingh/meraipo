@@ -8,6 +8,7 @@ export function SiteNavigation({ trackerEnabled = false }: { trackerEnabled?: bo
       {[
         ['/', 'Home'],
         ...(trackerEnabled ? [['/tracker', 'IPO Tracker']] : []),
+        ['/ipo-status', 'IPO Status'],
         ['/about', 'About / Methodology'],
       ].map(([href, label]) => (
         <Link

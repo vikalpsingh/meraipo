@@ -2389,3 +2389,44 @@ body:has(.company-preview[open]) {
   width: auto;
   min-width: 5rem;
 }
+
+.tracker-sort-button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+}
+.tracker-sort-button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.ipo-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.ipo-status-panel > p {
+  max-width: 75ch;
+}
+.ipo-status-frame {
+  display: block;
+  width: 100%;
+  height: 75vh;
+  min-height: 600px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+}
+@media (max-width: 760px) {
+  .ipo-status-panel {
+    padding: 16px;
+  }
+  .ipo-status-frame {
+    min-height: 560px;
+  }
+}
