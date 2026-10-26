@@ -110,7 +110,6 @@ services:
         SITE_URL: ${SITE_URL:-http://localhost:3000}
     environment:
       API_INTERNAL_URL: http://api:8000
-      NSE_IPO_EMBED_ENABLED: ${NSE_IPO_EMBED_ENABLED:-true}
       CRON_SECRET: ${CRON_SECRET:-}
       SITE_URL: ${SITE_URL:-http://localhost:3000}
     expose: ["3000"]

@@ -1,11 +1,7 @@
-'use client';
-
-import { useState } from 'react';
+import Image from 'next/image';
 import { nseIpoStatusUrl } from '@/lib/nse-ipo-status';
 
-export function IPOStatusFrame({ embedEnabled = true }: { embedEnabled?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  const showFrame = embedEnabled && !failed;
+export function IPOStatusFrame() {
   return (
     <section className="panel ipo-status-panel" aria-label="NSE IPO bid verification">
       <div className="ipo-status-actions">
@@ -17,31 +13,31 @@ export function IPOStatusFrame({ embedEnabled = true }: { embedEnabled?: boolean
         >
           Open on NSE ↗
         </a>
-        {showFrame && (
-          <button className="outline-button" type="button" onClick={() => setFailed(true)}>
-            Hide embedded form
-          </button>
-        )}
       </div>
-      <p role="status">
-        {showFrame
-          ? 'If the form is blank or blocked, open it on NSE in a new tab. Your MeraIPO page stays open.'
-          : 'The embedded form is unavailable or hidden. Open on NSE to check your status; your MeraIPO page stays open.'}
+      <p>
+        Select the preview below to check your status on NSE in a new tab. Your MeraIPO page stays
+        open.
       </p>
       <p className="small">
         Enter your details only in NSE’s form. MeraIPO does not receive your PAN, application number
         or results.
       </p>
-      {showFrame && (
-        <iframe
-          className="ipo-status-frame"
-          src={nseIpoStatusUrl}
-          title="NSE IPO bid and allotment verification form"
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-          onError={() => setFailed(true)}
+      <a
+        className="ipo-status-preview"
+        href={nseIpoStatusUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Check IPO bid or allotment status on NSE (opens in a new tab)"
+      >
+        <span className="ipo-status-preview-caption">NSE form preview · Open on NSE ↗</span>
+        <Image
+          src="/ipo-status/nse-status-preview.png"
+          width={897}
+          height={500}
+          sizes="(max-width: 760px) 90vw, 897px"
+          alt="Preview of NSE’s IPO bid and allotment form with IPO selection, PAN or application number fields. This is an image, not an interactive form."
         />
-      )}
+      </a>
     </section>
   );
 }

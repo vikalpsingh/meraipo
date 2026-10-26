@@ -20,7 +20,7 @@ export default function IPOStatus() {
           </p>
         </div>
       </div>
-      <IPOStatusFrame embedEnabled={process.env.NSE_IPO_EMBED_ENABLED !== 'false'} />
+      <IPOStatusFrame />
     </main>
   );
 }

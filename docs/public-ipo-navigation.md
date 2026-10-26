@@ -43,3 +43,13 @@ entered or submitted and no framing restrictions were bypassed.
 Local startup was attempted using Compose, Docker Desktop start and a normal
 restart. The daemon still reports “Docker Desktop is unable to start”. No volumes
 were reset or deleted. Full local deployment/startup remains blocked on Docker.
+
+## Update — 26 October 2026
+
+The NSE iframe has been replaced with the user-supplied screenshot, stored at
+`apps/web/public/ipo-status/nse-status-preview.png`. The responsive preview is an
+accessible new-tab link to the official NSE page and is explicitly labelled as
+an image. The separate Open on NSE button remains. No personal details are
+collected by MeraIPO. Removed the obsolete embed switch and NSE frame permission;
+child frames are now disallowed. Earlier embedding notes above describe the
+superseded implementation.
