@@ -108,7 +108,7 @@ export default async function Home({
   return (
     <main className="ipo-home">
       <BrokerShortcuts />
-      {flags.email_alerts && <ListingGainSubscription />}
+      {flags.email_alerts && <ListingGainSubscription companies={[...open.items, ...scheduled]} asOf={now.getTime()} />}
       <div className="page-heading">
         <div>
           <p className="eyebrow">THE PRIMARY MARKET</p>

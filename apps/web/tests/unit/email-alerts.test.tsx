@@ -26,8 +26,8 @@ it('requires explicit consent, names and a single GMP band with optional phone',
     target: { value: 'person@example.com' },
   });
   fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Test' } });
-  fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Person' } });
-  expect(screen.getByLabelText('Phone number (optional)*')).not.toBeRequired();
+  fireEvent.change(screen.getByLabelText('Surname (last name)*'), { target: { value: 'Person' } });
+  expect(screen.getByLabelText('Phone No (optional)')).not.toBeRequired();
   expect(screen.getAllByRole('radio')).toHaveLength(4);
   fireEvent.click(screen.getByLabelText('Gold: above 100%'));
   fireEvent.click(screen.getByRole('checkbox'));
@@ -70,7 +70,7 @@ it('does not load Google until optional consent and supports withdrawal', async 
   expect(localStorage.getItem('meraipo-analytics-consent')).toBe('denied');
 });
 
-it('opens the subscription dialog without navigation and restores trigger focus on close', () => {
+it('opens the automatic dialog without a homepage subscription link', () => {
   const show = vi.fn(function (this: HTMLDialogElement) {
     this.setAttribute('open', '');
   });
@@ -83,16 +83,31 @@ it('opens the subscription dialog without navigation and restores trigger focus 
     value: show,
   });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: close });
+  document.cookie = 'meraipo-alert-prompt=; Max-Age=0; Path=/';
   render(<ListingGainSubscription />);
-  const trigger = screen.getByRole('button', { name: 'Listing gain email subscription*' });
-  expect(trigger).toHaveAttribute('title', expect.stringContaining('not a guarantee'));
-  fireEvent.click(trigger);
+  expect(screen.queryByRole('button', { name: /Listing gain email subscription/ })).toBeNull();
   expect(show).toHaveBeenCalledOnce();
   expect(screen.getByRole('dialog')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Close ✕' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Do it later · Close ✕' }));
   expect(close).toHaveBeenCalledOnce();
-  expect(trigger).toHaveFocus();
   expect(window.location.pathname).toBe('/');
   show.mockRestore();
   close.mockRestore();
+});
+
+it('automatically invites a new visitor once and remembers it without contact details', () => {
+  document.cookie = 'meraipo-alert-prompt=; Max-Age=0; Path=/';
+  const show = vi.fn(function (this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: show,
+  });
+  const first = render(<ListingGainSubscription />);
+  expect(show).toHaveBeenCalledOnce();
+  expect(document.cookie).toContain('meraipo-alert-prompt=seen');
+  first.unmount();
+  render(<ListingGainSubscription />);
+  expect(show).toHaveBeenCalledOnce();
 });

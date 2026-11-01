@@ -93,7 +93,7 @@ async def test_subscription_dedup_confirm_unsubscribe(client, db):
                 "consent": True,
                 "first_name": "Test",
                 "last_name": "Person",
-                "gmp_band": "gold",
+                "gmp_band": "white" if email == "Person@example.com" else "gold",
             },
             headers=headers,
         )
@@ -522,3 +522,18 @@ async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
     # Explicit preferences must never receive the legacy listing-day campaign.
     await send_one(db, old.id, approved=True)
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize(
+    "band,expected",
+    [
+        ("white", ("white",)),
+        ("light_green", ("white", "light_green")),
+        ("strong_green", ("white", "light_green", "strong_green")),
+        ("gold", ("white", "light_green", "strong_green", "gold")),
+    ],
+)
+def test_cumulative_subscription_thresholds(band, expected):
+    from packages.shared.email_preferences import matching_preferences
+
+    assert matching_preferences(band) == expected

@@ -30,7 +30,7 @@ from packages.shared.email_alerts import (
     within_window,
 )
 from packages.shared.email_policy import production_checks
-from packages.shared.email_preferences import current_band
+from packages.shared.email_preferences import current_band, matching_preferences
 from packages.shared.email_template import content, eligible_listing, eligible_opening
 from packages.shared.market_config import decrypt_secret
 
@@ -102,7 +102,11 @@ async def prepare(db):
                     m.EmailSubscriber.verified_at.is_not(None),
                     m.EmailSubscriber.unsubscribed_at.is_(None),
                     m.EmailSubscriber.suppressed_at.is_(None),
-                    m.EmailSubscriber.gmp_band == band,
+                    (
+                        m.EmailSubscriber.gmp_band.in_(matching_preferences(band))
+                        if opening
+                        else m.EmailSubscriber.gmp_band.is_(None)
+                    ),
                     ~exists,
                 )
                 .limit(200)
@@ -287,7 +291,7 @@ async def send_one(db, key, approved=False):
         if (
             row.kind == "ALERT"
             and campaign.kind == "ipo_opening"
-            and subscriber.gmp_band != await current_band(db, ipo)
+            and subscriber.gmp_band not in matching_preferences(await current_band(db, ipo))
         ):
             # Revisit later today without consuming a send attempt or blocking other outbox rows.
             row.status = "PENDING"

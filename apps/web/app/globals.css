@@ -2519,3 +2519,38 @@ body:has(.company-preview[open]) {
 .email-signup input:not([type=checkbox]):not([type=radio]) { width: 100%; min-height: 44px; }
 .email-signup .gmp-preferences label { display: flex; }
 .subscription-dialog .email-signup { margin: 0; padding: .75rem; }
+
+/* Subscription invitation */
+.subscription-dialog { width: min(960px, calc(100vw - 24px)); padding: 0; background: #fff; box-shadow: 0 28px 100px #071d3566; }
+.subscription-close { position: sticky; top: 0; z-index: 2; background: #fff; color: #23454a; border: 0; padding: 12px 20px; border-radius: 0 0 0 16px; }
+.signup-layout { display: grid; grid-template-columns: .9fr 1.1fr; }
+.signup-story { background: linear-gradient(145deg, #092d36, #146953); color: #e8fff4; padding: 30px; }
+.signup-story h2 { color: #fff; font-size: clamp(25px, 3vw, 36px); line-height: 1.15; letter-spacing: -.04em; }
+.signup-story h2 em { color: #a1edc9; font-style: normal; }
+.signup-story h3 { color: #fff; font-size: 16px; }
+.signup-eyebrow { letter-spacing: .12em; font-size: 11px; font-weight: 700; }
+.signup-chart { width: 100%; height: 115px; margin: 12px 0; }
+.signup-example { border: 1px solid #ffffff30; background: #ffffff0c; border-radius: 12px; padding: 14px; margin: 12px 0; }
+.signup-example > span, .signup-example small { display: block; font-size: 11px; color: #c3ded6; }
+.signup-example strong { display: block; margin-top: 8px; }
+.signup-example p { margin: 8px 0; font-size: 13px; }
+.signup-example b { font-size: 23px; color: #c7f6ab; }
+.signup-risk { font-size: 11px; line-height: 1.6; color: #cde6de; }
+.subscription-dialog .email-signup { padding: 24px; border: 0; border-radius: 0; box-shadow: none; }
+.email-signup h1 { font-size: 27px; letter-spacing: -.03em; }
+.signup-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.signup-fields label { font-size: 13px; font-weight: 650; }
+.signup-fields input { border: 1px solid #cbdad6; border-radius: 10px; background: #f8fbfa; padding: 12px; min-width: 0; font: inherit; }
+.signup-fields input:focus { outline: 3px solid #b5e6d3; border-color: #1c775a; background: #fff; }
+.signup-private { font-size: 12px; color: #526967; }
+.email-signup .gmp-preferences { border: 0; padding: 0; }
+.gmp-preferences legend { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.email-signup .gmp-preferences label { border: 1px solid #d5dfdb; border-radius: 10px; padding: 12px; margin: 8px 0; font-size: 13px; cursor: pointer; }
+.gmp-preferences label:nth-of-type(2) { background: #edf8e8; }
+.gmp-preferences label:nth-of-type(3) { background: #d2efda; }
+.gmp-preferences label:nth-of-type(4) { background: #fff2c7; }
+.gmp-preferences label:has(input:checked) { outline: 2px solid #206a53; outline-offset: 1px; }
+.email-signup button[type=submit] { width: 100%; background: #12624b; color: #fff; border: 0; border-radius: 12px; padding: 14px; font-weight: 700; }
+.email-signup .email-consent, .email-signup form > p { font-size: 12px; line-height: 1.6; }
+@media(max-width: 700px) { .signup-layout { grid-template-columns: 1fr; } .signup-story { padding: 24px; } .signup-chart { height: 65px; } .signup-example { display: inline-block; vertical-align: top; width: 100%; } }
+@media(max-width: 380px) { .signup-fields { grid-template-columns: 1fr; } }

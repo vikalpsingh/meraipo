@@ -67,7 +67,7 @@ This measurement ID enables browser collection, not server-side reporting access
 ## Opening-day GMP subscriptions
 
 Apply migration `20261101_email_preferences` before deploying the API/worker changes.
-The homepage shortcut follows the broker bar and respects the existing `email_alerts` release flag.
+The homepage popup opens once per browser (a non-identifying, one-year preference cookie remembers display/dismissal/submission); visitors can use the footer email-alerts page to subscribe later. Cookies contain no contact details. Example gains use actual fresh homepage GMP with explicitly hypothetical budgets, not minimum lots. The automatic homepage popup respects the existing `email_alerts` release flag.
 First/last names and email are required; phone is optional. A single GMP band is mandatory.
 Contact data and pending verification profiles are encrypted. Confirmation applies a staged
 preference update; posting another person's email cannot overwrite their active preferences.
@@ -75,14 +75,14 @@ No contact details enter analytics or public URLs. Phone is not used for calls o
 
 New subscribers receive `ipo_opening` alerts only, from the configured IST send hour until
 midnight on the confirmed, verified IPO opening date. GMP is divided by the upper price band:
-white <=20% or missing/stale, light green >20–40%, strong green >40–100%, gold >100%.
+white subscribes to ALL IPOs including missing/stale GMP; light green subscribes to >20%, strong green to >40%, and gold to >100%. These are cumulative subscription thresholds, separate from exclusive homepage row colours.
 The latest nonfuture snapshot is rechecked before dispatch. A changed band defers the pending
 message for ten minutes; it can send only if it matches again on the same opening day.
 There is at most one accepted alert per subscriber/IPO/campaign kind; ambiguous SES sends
 retain the existing no-automatic-retry policy. All existing suppression and production gates apply.
 Legacy subscribers with no selected band retain pre-listing alerts until they confirm a new
 preference. No preferences are inferred or backfilled. Existing subscribers can use the same
-form to request a confirmed change. Pending confirmation requests are limited to one per 24h.
+form to request a confirmed change. A pending confirmation stores the latest submitted profile without sending another email within 24h. The existing confirmation link applies that latest profile.
 
 Deploy migration, API, web and worker together. Do not enable public signup until SES readiness,
 admin test delivery and production controls have been reviewed as documented in `ses-production.md`.

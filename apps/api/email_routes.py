@@ -92,7 +92,7 @@ async def subscribe(request: Request, db=Depends(get_session)):
         select(m.EmailSubscriber).where(m.EmailSubscriber.email_hash == identity).with_for_update()
     )
     recent = await db.scalar(
-        select(m.EmailDelivery.id)
+        select(m.EmailDelivery)
         .where(
             m.EmailDelivery.subscriber_id == subscriber.id,
             m.EmailDelivery.kind == "VERIFY",
@@ -101,6 +101,8 @@ async def subscribe(request: Request, db=Depends(get_session)):
         )
         .limit(1)
     )
+    if not subscriber.suppressed_at and recent:
+        recent.requested_profile_encrypted = encrypt_secret(json.dumps(profile, ensure_ascii=False))
     if not subscriber.suppressed_at and not recent:
         verification = delivery(subscriber.id)
         verification.requested_profile_encrypted = encrypt_secret(

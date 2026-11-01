@@ -1,4 +1,4 @@
-"""Exclusive GMP bands and private, confirmation-gated subscriber profiles."""
+"""Cumulative GMP preferences and private, confirmation-gated subscriber profiles."""
 
 import re
 from datetime import timedelta
@@ -66,3 +66,8 @@ async def current_band(db, ipo):
     ):
         return "white"
     return band_for_percent(latest.value / ipo.price_high * 100)
+
+
+def matching_preferences(band):
+    """White means all IPOs; higher thresholds include every higher band."""
+    return BANDS[: BANDS.index(band) + 1]

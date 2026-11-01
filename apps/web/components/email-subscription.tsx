@@ -2,7 +2,13 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-export function EmailSubscription({ action = 'subscribe' }: { action?: string }) {
+export function EmailSubscription({
+  action = 'subscribe',
+  onSubscribed,
+}: {
+  action?: string;
+  onSubscribed?: () => void;
+}) {
   const [token, setToken] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,6 +50,7 @@ export function EmailSubscription({ action = 'subscribe' }: { action?: string })
       if (!response.ok) throw new Error(data.error?.message || 'Please try again later.');
       setMessage(data.message);
       setDone(true);
+      if (action === 'subscribe') onSubscribed?.();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Service unavailable');
     } finally {
@@ -54,42 +61,73 @@ export function EmailSubscription({ action = 'subscribe' }: { action?: string })
     <section className="email-signup panel">
       <h1>
         {action === 'subscribe'
-          ? 'IPO email alerts'
+          ? 'Your next IPO starts here'
           : action === 'verify'
             ? 'Confirm your email'
             : 'Unsubscribe from alerts'}
       </h1>
       <p>
         {action === 'subscribe'
-          ? 'Get an alert on the IPO opening day only when the latest available GMP matches your selected band. One alert per IPO. Stale or missing GMP counts as unavailable. GMP is unofficial and cannot guarantee listing gains. Dates can change; check the IPO guide for the latest details.'
+          ? 'Opening-day alerts, matched to your interests. Choose all IPOs or a minimum GMP threshold. One alert per IPO. GMP is unofficial and does not guarantee a listing gain.'
           : 'Use the button below to complete your request.'}
       </p>
       {!done && (
         <form onSubmit={submit}>
           {action === 'subscribe' ? (
             <>
-              <label>
-                First name
-                <input name="first_name" autoComplete="given-name" maxLength={80} required />
-              </label>
-              <label>
-                Last name
-                <input name="last_name" autoComplete="family-name" maxLength={80} required />
-              </label>
-              <label>
-                Phone number (optional)*
-                <input name="phone" type="tel" autoComplete="tel" maxLength={24} />
-              </label>
-              <p>
-                * We do not share your contact details with marketing companies or brands. Phone is
-                optional and is not used for marketing calls.
+              <div className="signup-fields">
+                <label>
+                  First name
+                  <input
+                    name="first_name"
+                    placeholder="Your first name"
+                    autoComplete="given-name"
+                    maxLength={80}
+                    required
+                  />
+                </label>
+                <label>
+                  Surname (last name)*
+                  <input
+                    name="last_name"
+                    placeholder="Your surname"
+                    autoComplete="family-name"
+                    maxLength={80}
+                    required
+                  />
+                </label>
+                <label>
+                  Email address
+                  <input
+                    name="email"
+                    placeholder="you@example.com"
+                    type="email"
+                    autoComplete="email"
+                    maxLength={254}
+                    required
+                  />
+                </label>
+                <label>
+                  Phone No (optional)
+                  <input
+                    name="phone"
+                    placeholder="Optional phone number"
+                    type="tel"
+                    autoComplete="tel"
+                    maxLength={24}
+                  />
+                </label>
+              </div>
+              <p className="signup-private">
+                Your contact details are not shared with marketing companies or brands. No marketing
+                calls.
               </p>
               <fieldset className="gmp-preferences">
-                <legend>Choose one GMP band (required)</legend>
+                <legend>What would you like to follow? Choose one.</legend>
                 {[
-                  ['white', 'neutral', 'White: 20% or below, or unavailable'],
-                  ['light_green', 'light-green', 'Light green: above 20% to 40%'],
-                  ['strong_green', 'dark-green', 'Stronger green: above 40% to 100%'],
+                  ['white', 'neutral', 'All IPOs: every GMP level, including unavailable'],
+                  ['light_green', 'light-green', 'Light green: above 20%'],
+                  ['strong_green', 'dark-green', 'Stronger green: above 40%'],
                   ['gold', 'gold', 'Gold: above 100%'],
                 ].map(([value, tone, label]) => (
                   <label key={value}>
@@ -99,19 +137,16 @@ export function EmailSubscription({ action = 'subscribe' }: { action?: string })
                   </label>
                 ))}
               </fieldset>
-              <label>
-                Email address
-                <input name="email" type="email" autoComplete="email" maxLength={254} required />
-              </label>
               <label className="email-consent">
                 <input name="consent" type="checkbox" required /> I agree to receive MeraIPO IPO
                 reminders. I can unsubscribe at any time.
               </label>
               <p>
-                We send a confirmation first. Contact details are stored encrypted. Your preference
-                changes apply only after confirmation. Delivery and link interactions are recorded
-                to improve alerts; website analytics requires separate consent.{' '}
-                <Link href="/privacy">Privacy policy</Link>.
+                Your email address is your unique subscription key. Enter the same address again to
+                replace your details and preferences after email confirmation. Contact details are
+                encrypted. Your preference changes apply only after confirmation. Delivery and link
+                interactions are recorded to improve alerts; website analytics requires separate
+                consent. <Link href="/privacy">Privacy policy</Link>.
               </p>
             </>
           ) : (
