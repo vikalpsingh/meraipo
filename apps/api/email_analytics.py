@@ -227,12 +227,16 @@ async def analytics(
         "page_size": page_size,
         "summary": summary,
         "operations": operations,
-        "enabled": settings().email_alerts_enabled
-        and settings().ipo_email_sending_enabled
+        "enabled": settings().ipo_email_sending_enabled
         and (await control(db)).sending_enabled
         and await feature_enabled(db),
         "sender": settings().email_from or None,
-        "sending_configured": settings().email_alerts_enabled,
+        "sending_configured": bool(
+            settings().email_from
+            and settings().ses_configuration_set
+            and settings().ses_sns_topic_arn
+            and len(settings().email_token_secret.get_secret_value()) >= 32
+        ),
         "send_hour_ist": settings().email_send_hour_ist,
         "definitions": "Email metrics use messages accepted in the selected IST dates, with outcomes received to date. Clickers are distinct recipients with a confirmed delivery; suspected scanners are excluded, remaining clicks are unclassified. Traffic uses sessions occurring in the selected dates, including older emails. Growth counts first verification, including later unsubscribes. Unsubscribe counts are distinct recipients attributed to delivered emails.",
     }

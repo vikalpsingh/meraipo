@@ -17,7 +17,6 @@ from packages.providers.ses_events import verify_sns
 from packages.shared.calculations import utc
 from packages.shared.config import settings
 from packages.shared.email_alerts import (
-    active,
     classify_click,
     delivery,
     digest,
@@ -27,7 +26,8 @@ from packages.shared.email_alerts import (
     token_expired,
     tracked_url,
 )
-from packages.shared.market_config import encrypt_secret
+from packages.shared.email_preferences import validate_profile
+from packages.shared.market_config import decrypt_secret, encrypt_secret
 
 router = APIRouter()
 
@@ -51,11 +51,7 @@ async def throttle(key, limit, seconds):
 
 def enabled():
     c = settings()
-    if (
-        not c.email_alerts_enabled
-        or not c.email_from
-        or len(c.email_token_secret.get_secret_value()) < 32
-    ):
+    if not c.email_from or len(c.email_token_secret.get_secret_value()) < 32:
         raise HTTPException(503, "Email alerts are not configured yet.")
 
 
@@ -66,17 +62,21 @@ def origin(request):
 
 @router.post("/ipo-alerts/subscribe", status_code=202)
 async def subscribe(request: Request, db=Depends(get_session)):
-    enabled()
     if not await feature_enabled(db):
         raise HTTPException(404, "Email alerts are currently unavailable.")
+    enabled()
     origin(request)
     try:
         body = await request.json()
         if body.get("consent") is not True:
             raise ValueError("Consent is required")
         email = normalized_email(body.get("email", ""))
+        profile = validate_profile(body)
     except (ValueError, TypeError, AttributeError):
-        raise HTTPException(422, "A valid email and consent are required.") from None
+        raise HTTPException(
+            422,
+            "Enter first and last name, a valid email, one GMP band and consent. Phone is optional.",
+        ) from None
     identity = token(email, "email")
     await throttle("address:" + identity, 3, 86400)
     # The API sees the reverse proxy, not a trustworthy visitor IP. Per-IP limits
@@ -96,12 +96,17 @@ async def subscribe(request: Request, db=Depends(get_session)):
         .where(
             m.EmailDelivery.subscriber_id == subscriber.id,
             m.EmailDelivery.kind == "VERIFY",
+            m.EmailDelivery.status != "CONFIRMED",
             m.EmailDelivery.created_at > m.now() - timedelta(hours=24),
         )
         .limit(1)
     )
-    if not active(subscriber) and not subscriber.suppressed_at and not recent:
-        db.add(delivery(subscriber.id))
+    if not subscriber.suppressed_at and not recent:
+        verification = delivery(subscriber.id)
+        verification.requested_profile_encrypted = encrypt_secret(
+            json.dumps(profile, ensure_ascii=False)
+        )
+        db.add(verification)
     await db.commit()
     # Same response for new, existing and suppressed addresses (no enumeration).
     return JSONResponse(
@@ -143,10 +148,19 @@ async def confirm(request: Request, db=Depends(get_session)):
     if row.status != "CONFIRMED":
         subscriber.verified_at = subscriber.verified_at or m.now()
         subscriber.unsubscribed_at = None
+        if row.requested_profile_encrypted:
+            profile = json.loads(decrypt_secret(row.requested_profile_encrypted))
+            subscriber.contact_encrypted = encrypt_secret(
+                json.dumps(
+                    {k: v for k, v in profile.items() if k != "gmp_band"}, ensure_ascii=False
+                )
+            )
+            subscriber.gmp_band = profile["gmp_band"]
+            row.requested_profile_encrypted = None
         subscriber.consent_at = m.now()
         row.status = "CONFIRMED"
     await db.commit()
-    return {"message": "Your email is confirmed. You are subscribed to pre-listing IPO alerts."}
+    return {"message": "Your email is confirmed. Your confirmed IPO alert preferences are saved."}
 
 
 async def do_unsubscribe(db, value):

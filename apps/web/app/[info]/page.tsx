@@ -100,7 +100,7 @@ const pages: Record<string, { title: string; intro: string; sections: [string, s
       ],
       [
         'Email alerts and retention',
-        'We encrypt email addresses, record consent and confirmation, and use Amazon SES to deliver reminders. Delivery, bounce, complaint and link events support delivery reporting; raw events are retained for up to 400 days by default. Subscriber preferences and delivery records remain until an operator handles a deletion request. Unsubscribe in any alert, or contact us for deletion. We never send email addresses to Google Analytics.',
+        'We encrypt email addresses, first and last names and optional phone numbers, record your selected GMP band, consent and confirmation, and use Amazon SES to deliver reminders. New band subscriptions receive matching IPO opening-day alerts only. We do not share contact details with marketing companies or brands, or use optional phone numbers for marketing calls. Delivery, bounce, complaint and link events support delivery reporting; raw events are retained for up to 400 days by default. Subscriber preferences and delivery records remain until an operator handles a deletion request. Unsubscribe in any alert, or contact us for deletion. We never send names, phone numbers or email addresses to Google Analytics.',
       ],
       [
         'What we do not request',

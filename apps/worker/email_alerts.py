@@ -30,7 +30,8 @@ from packages.shared.email_alerts import (
     within_window,
 )
 from packages.shared.email_policy import production_checks
-from packages.shared.email_template import content, eligible_listing
+from packages.shared.email_preferences import current_band
+from packages.shared.email_template import content, eligible_listing, eligible_opening
 from packages.shared.market_config import decrypt_secret
 
 
@@ -39,7 +40,7 @@ async def prepare(db):
         return
     config = settings()
     today = m.now().astimezone(ZoneInfo("Asia/Kolkata"))
-    if not within_window():
+    if today.hour < config.email_send_hour_ist:
         return
     listings = (
         await db.execute(
@@ -48,20 +49,26 @@ async def prepare(db):
             .join(m.Company, m.Company.id == m.IPO.company_id)
             .join(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
             .where(
-                m.IPODate.listing_date == today.date() + timedelta(days=1),
+                (m.IPODate.listing_date == today.date() + timedelta(days=1))
+                | (m.IPODate.open_date == today.date()),
                 m.Company.is_demo.is_(False),
             )
         )
     ).all()
     for ipo, dates, guide in listings:
-        if not eligible_listing(ipo, dates, guide, today.date()):
+        opening = eligible_opening(ipo, dates, guide, today.date())
+        if not opening and not (
+            within_window() and eligible_listing(ipo, dates, guide, today.date())
+        ):
             continue
+        kind = "ipo_opening" if opening else CAMPAIGN
+        band = await current_band(db, ipo) if opening else None
         ipo_id = ipo.id
         await db.execute(
             insert_for(db, m.EmailCampaign)
             .values(
                 ipo_id=ipo_id,
-                kind=CAMPAIGN,
+                kind=kind,
                 scheduled_date=today.date(),
                 scheduled_at=datetime.combine(
                     today.date(), time(hour=config.email_send_hour_ist), ZoneInfo("Asia/Kolkata")
@@ -72,7 +79,7 @@ async def prepare(db):
         campaign = await db.scalar(
             select(m.EmailCampaign).where(
                 m.EmailCampaign.ipo_id == ipo_id,
-                m.EmailCampaign.kind == CAMPAIGN,
+                m.EmailCampaign.kind == kind,
                 m.EmailCampaign.scheduled_date == today.date(),
             )
         )
@@ -83,7 +90,7 @@ async def prepare(db):
             .where(
                 m.EmailDelivery.subscriber_id == m.EmailSubscriber.id,
                 m.EmailCampaign.ipo_id == ipo_id,
-                m.EmailCampaign.kind == CAMPAIGN,
+                m.EmailCampaign.kind == kind,
                 m.EmailDelivery.kind == "ALERT",
             )
             .exists()
@@ -95,6 +102,7 @@ async def prepare(db):
                     m.EmailSubscriber.verified_at.is_not(None),
                     m.EmailSubscriber.unsubscribed_at.is_(None),
                     m.EmailSubscriber.suppressed_at.is_(None),
+                    m.EmailSubscriber.gmp_band == band,
                     ~exists,
                 )
                 .limit(200)
@@ -103,7 +111,7 @@ async def prepare(db):
         for subscriber_id in subscribers:
             reserved = await db.execute(
                 insert_for(db, m.EmailReservation)
-                .values(subscriber_id=subscriber_id, ipo_id=ipo_id, alert_type=CAMPAIGN)
+                .values(subscriber_id=subscriber_id, ipo_id=ipo_id, alert_type=kind)
                 .on_conflict_do_nothing(index_elements=["subscriber_id", "ipo_id", "alert_type"])
             )
             if reserved.rowcount != 1:
@@ -205,8 +213,6 @@ def ses_send(destination, subject, text, unsubscribe, delivery_id, markup_overri
 
 
 async def send_one(db, key, approved=False):
-    if not settings().email_alerts_enabled:
-        return
     initial = await db.get(m.EmailDelivery, key, populate_existing=True)
     if not initial:
         return
@@ -249,7 +255,7 @@ async def send_one(db, key, approved=False):
             await db.commit()
             return
         subject = "Confirm your MeraIPO email alerts"
-        text = f"You requested MeraIPO pre-listing alerts. Confirm within 24 hours:\n{origin}/email-alerts/verify#{action}\nIgnore this email if you did not request it."
+        text = f"You requested MeraIPO email alerts or a preference update. Confirm within 24 hours:\n{origin}/email-alerts/verify#{action}\nIgnore this email if you did not request it."
     else:
         campaign = await db.get(m.EmailCampaign, row.campaign_id)
         ipo = await db.get(m.IPO, campaign.ipo_id)
@@ -257,19 +263,45 @@ async def send_one(db, key, approved=False):
         guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
         today = m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
         if row.kind == "ALERT" and (
-            campaign.kind != CAMPAIGN
-            or campaign.scheduled_date != today
-            or not within_window()
-            or not eligible_listing(ipo, dates, guide, today)
+            campaign.scheduled_date != today
+            or not (
+                (
+                    campaign.kind == CAMPAIGN
+                    and subscriber.gmp_band is None
+                    and within_window()
+                    and eligible_listing(ipo, dates, guide, today)
+                )
+                or (
+                    campaign.kind == "ipo_opening"
+                    and subscriber.gmp_band is not None
+                    and eligible_opening(ipo, dates, guide, today)
+                    and m.now().astimezone(ZoneInfo("Asia/Kolkata")).hour
+                    >= settings().email_send_hour_ist
+                )
+            )
         ):
             row.status = "CANCELLED"
             row.error_code = "SCHEDULE_NO_LONGER_ELIGIBLE"
             await db.commit()
             return
+        if (
+            row.kind == "ALERT"
+            and campaign.kind == "ipo_opening"
+            and subscriber.gmp_band != await current_band(db, ipo)
+        ):
+            # Revisit later today without consuming a send attempt or blocking other outbox rows.
+            row.status = "PENDING"
+            row.attempt_count -= 1
+            row.retry_at = m.now() + timedelta(minutes=10)
+            row.error_code = "GMP_BAND_CHANGED"
+            await db.commit()
+            return
         company = await db.get(m.Company, ipo.company_id)
         from packages.shared.email_alerts import tracked_url
 
-        public_url = tracked_url(origin + "/ipo/" + company.slug, company.slug)
+        public_url = tracked_url(
+            origin + "/ipo/" + company.slug, company.slug, campaign=campaign.kind
+        )
         unsubscribe = origin + "/api/ipo-alerts/unsubscribe/" + action
         template = await content(
             db,
@@ -277,6 +309,7 @@ async def send_one(db, key, approved=False):
             public_url,
             origin + "/email-alerts/unsubscribe#" + action,
             test=row.kind == "TEST",
+            opening=campaign.kind == "ipo_opening",
         )
         subject, text, markup = template["subject"], template["text"], template["html"]
     try:
@@ -391,46 +424,43 @@ def email_tick():
                 db.add(job)
                 await db.commit()
                 run_id = job.id
-                if not settings().email_alerts_enabled:
-                    job.status = "DISABLED"
-                else:
-                    state, checks = await production_checks(db)
-                    approved = state.sending_enabled and checks["ready"]
-                    if approved:
-                        await prepare(db)
-                    allowed = (
-                        ["TEST"]
-                        + (["VERIFY"] if await feature_enabled(db) else [])
-                        + (["ALERT"] if approved else [])
-                    )
-                    aws = checks["aws"]
-                    rate = min(settings().email_max_per_second, aws.get("max_rate") or 1)
-                    capacity = min(
-                        settings().email_batch_size,
-                        int(aws.get("remaining_quota") or 0),
-                        max(1, int(150 * rate)),
-                    )
-                    keys = (
-                        await db.scalars(
-                            select(m.EmailDelivery.id)
-                            .where(
-                                m.EmailDelivery.kind.in_(allowed),
-                                m.EmailDelivery.status.in_(["PENDING", "RETRY"]),
-                                m.EmailDelivery.retry_at.is_(None)
-                                | (m.EmailDelivery.retry_at <= m.now()),
-                            )
-                            .order_by(m.EmailDelivery.created_at)
-                            .limit(capacity)
+                state, checks = await production_checks(db)
+                approved = state.sending_enabled and checks["ready"]
+                if approved:
+                    await prepare(db)
+                allowed = (
+                    ["TEST"]
+                    + (["VERIFY"] if await feature_enabled(db) else [])
+                    + (["ALERT"] if approved else [])
+                )
+                aws = checks["aws"]
+                rate = min(settings().email_max_per_second, aws.get("max_rate") or 1)
+                capacity = min(
+                    settings().email_batch_size,
+                    int(aws.get("remaining_quota") or 0),
+                    max(1, int(150 * rate)),
+                )
+                keys = (
+                    await db.scalars(
+                        select(m.EmailDelivery.id)
+                        .where(
+                            m.EmailDelivery.kind.in_(allowed),
+                            m.EmailDelivery.status.in_(["PENDING", "RETRY"]),
+                            m.EmailDelivery.retry_at.is_(None)
+                            | (m.EmailDelivery.retry_at <= m.now()),
                         )
-                    ).all()
-                    for key in keys:
-                        await send_one(db, key, approved=approved)
-                        job.processed += 1
-                        current = await db.get(m.EmailDelivery, key, populate_existing=True)
-                        if current.status == "RETRY":
-                            break
-                        await asyncio.sleep(1 / rate)
-                    job.status = "COMPLETE" if approved else "TEST_ONLY"
+                        .order_by(m.EmailDelivery.created_at)
+                        .limit(capacity)
+                    )
+                ).all()
+                for key in keys:
+                    await send_one(db, key, approved=approved)
+                    job.processed += 1
+                    current = await db.get(m.EmailDelivery, key, populate_existing=True)
+                    if current.status == "RETRY":
+                        break
+                    await asyncio.sleep(1 / rate)
+                job.status = "COMPLETE" if approved else "TEST_ONLY"
                 job.finished_at = m.now()
                 await db.commit()
                 return {"status": job.status, "processed": job.processed}

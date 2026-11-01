@@ -22,7 +22,6 @@ ENVIRONMENT=production
 DEMO_MODE=false
 PUBLIC_ORIGIN=https://meraipo.com
 SITE_URL=https://meraipo.com
-EMAIL_ALERTS_ENABLED=true
 EMAIL_FROM=alerts@meraipo.com
 EMAIL_FROM_NAME=MeraIPO Alerts
 SES_REGION=ap-south-1
@@ -39,7 +38,7 @@ EMAIL_OPEN_TRACKING_ENABLED=false
 EMAIL_EVENT_RETENTION_DAYS=400
 ```
 
-Retain the existing stable `CONFIG_ENCRYPTION_KEY` and `EMAIL_TOKEN_SECRET` (at least 32 random characters each). Rotating these without a dedicated migration breaks identities, encryption or links. `EMAIL_ALERTS_ENABLED` permits subscription verification/tests; **`IPO_EMAIL_SENDING_ENABLED` is a separate environment permission**, and the persistent admin control also defaults OFF. Set the latter true only after smoke checks; it does not itself turn on the database switch.
+Retain the existing stable `CONFIG_ENCRYPTION_KEY` and `EMAIL_TOKEN_SECRET` (at least 32 random characters each). Rotating these without a dedicated migration breaks identities, encryption or links. The MeraAdmin `email_alerts` feature toggle controls subscription signup and subscriber messages; **`IPO_EMAIL_SENDING_ENABLED` is a separate environment permission**, and the persistent admin control also defaults OFF. Set the latter true only after smoke checks; it does not itself turn on the database switch.
 
 ## AWS resources and DNS — operator actions
 

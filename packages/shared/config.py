@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     public_origin: str = "http://localhost:3000"
     demo_mode: bool = False
-    email_alerts_enabled: bool = False
     email_from: str = "alerts@meraipo.com"
     email_from_name: str = "MeraIPO Alerts"
     ipo_email_sending_enabled: bool = False
@@ -68,7 +67,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_configuration(self):
-        if self.email_alerts_enabled:
+        if self.ipo_email_sending_enabled:
             from urllib.parse import urlsplit
 
             origin = urlsplit(self.public_origin)

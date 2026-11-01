@@ -7,7 +7,6 @@ from sqlalchemy import select
 from apps.api.security import admin
 from packages.database import models as m
 from packages.database.session import get_session
-from packages.shared.config import settings
 
 FEATURES = {
     "email_alerts": {
@@ -58,11 +57,6 @@ async def update_feature(
 ):
     if key not in FEATURES:
         raise HTTPException(404, "Unknown feature")
-    if key == "email_alerts" and data.enabled and not settings().email_alerts_enabled:
-        raise HTTPException(
-            409,
-            "Configure SES and enable EMAIL_ALERTS_ENABLED on the server before enabling email alerts.",
-        )
     row = await db.get(m.FeatureFlag, key)
     before = row.enabled if row else False
     if row is None:

@@ -24,7 +24,6 @@ def email_config(monkeypatch):
     monkeypatch.setattr("apps.worker.email_alerts.within_window", lambda: True)
     config = settings()
     for key, value in {
-        "email_alerts_enabled": True,
         "email_from": "alerts@example.com",
         "email_token_secret": SecretStr("test-only-email-token-secret-32-characters"),
         "ga4_property_id": "",
@@ -88,12 +87,23 @@ async def test_subscription_dedup_confirm_unsubscribe(client, db):
     headers = {"origin": "http://localhost:3000"}
     for email in ["Person@example.com", " person@example.com "]:
         response = await client.post(
-            "/api/v1/ipo-alerts/subscribe", json={"email": email, "consent": True}, headers=headers
+            "/api/v1/ipo-alerts/subscribe",
+            json={
+                "email": email,
+                "consent": True,
+                "first_name": "Test",
+                "last_name": "Person",
+                "gmp_band": "gold",
+            },
+            headers=headers,
         )
         assert response.status_code == 202
     assert await db.scalar(select(func.count()).select_from(m.EmailSubscriber)) == 1
     assert await db.scalar(select(func.count()).select_from(m.EmailDelivery)) == 1
     row = await db.scalar(select(m.EmailDelivery))
+    subscriber = await db.get(m.EmailSubscriber, row.subscriber_id)
+    assert subscriber.gmp_band is None
+    assert row.requested_profile_encrypted and "Test" not in row.requested_profile_encrypted
     value = token(row.id, "action")
     assert (
         await client.post("/api/v1/ipo-alerts/confirm", json={"token": value}, headers=headers)
@@ -104,6 +114,8 @@ async def test_subscription_dedup_confirm_unsubscribe(client, db):
     await client.post("/api/v1/ipo-alerts/confirm", json={"token": value}, headers=headers)
     sub = await db.get(m.EmailSubscriber, row.subscriber_id)
     assert sub.unsubscribed_at is not None  # replay cannot re-subscribe
+    assert sub.gmp_band == "gold"
+    assert sub.contact_encrypted and row.requested_profile_encrypted is None
 
 
 async def test_clicks_dedupe_unique_and_scanners(client, db):
@@ -355,18 +367,14 @@ def test_ses_payload_uses_supported_headers_and_safe_html(monkeypatch):
     assert captured["Content"]["Simple"]["Headers"][1]["Value"] == "List-Unsubscribe=One-Click"
 
 
-async def test_email_feature_gate_and_setup_requirement(admin_client, db, monkeypatch):
+async def test_email_feature_toggle_without_server_flag(admin_client, db, monkeypatch):
     response = await admin_client.post(
         "/api/v1/ipo-alerts/subscribe", json={"email": "off@example.com", "consent": True}
     )
     assert response.status_code == 404
-    monkeypatch.setattr(settings(), "email_alerts_enabled", False)
+    monkeypatch.setattr(settings(), "ses_sns_topic_arn", "")
     response = await admin_client.put("/api/v1/admin/features/email_alerts", json={"enabled": True})
-    assert response.status_code == 409
-    monkeypatch.setattr(settings(), "email_alerts_enabled", True)
-    assert (
-        await admin_client.put("/api/v1/admin/features/email_alerts", json={"enabled": True})
-    ).status_code == 200
+    assert response.status_code == 200
     assert (await db.get(m.FeatureFlag, "email_alerts")).enabled is True
     assert (
         await admin_client.put("/api/v1/admin/features/email_alerts", json={"enabled": False})
@@ -388,6 +396,11 @@ async def test_paused_feature_does_not_send_and_unsubscribe_stays_available(
     monkeypatch.setattr("apps.worker.email_alerts.ses_send", unexpected)
     await send_one(db, row.id)
     assert row.status == "PENDING"
+    verification = delivery(sub.id)
+    db.add(verification)
+    await db.commit()
+    await send_one(db, verification.id)
+    assert verification.status == "PENDING"
     response = await client.post(
         "/api/v1/ipo-alerts/unsubscribe",
         json={"token": token(row.id, "action")},
@@ -410,3 +423,102 @@ def test_opening_gmp_handles_zero_negative_missing_and_stale():
     row.value = Decimal("-10")
     row.observed_at = m.now() - timedelta(hours=settings().gmp_ttl_hours + 1)
     assert "₹-10.00" in opening_gmp(row) and "Stale" in opening_gmp(row)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, "white"),
+        (-1, "white"),
+        (20, "white"),
+        (20.01, "light_green"),
+        (40, "light_green"),
+        (40.01, "strong_green"),
+        (100, "strong_green"),
+        (100.01, "gold"),
+    ],
+)
+def test_exclusive_gmp_bands(value, expected):
+    from packages.shared.email_preferences import band_for_percent
+
+    assert band_for_percent(value) == expected
+
+
+def test_profile_requires_one_band_and_names_but_not_phone():
+    from packages.shared.email_preferences import validate_profile
+
+    body = {"first_name": "Test", "last_name": "Person", "gmp_band": "gold"}
+    assert validate_profile(body)["phone"] is None
+    for field, value in [
+        ("gmp_band", None),
+        ("gmp_band", ["gold", "white"]),
+        ("first_name", ""),
+        ("phone", "invalid"),
+    ]:
+        with pytest.raises(ValueError):
+            validate_profile({**body, field: value})
+
+
+async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
+    from decimal import Decimal
+    from zoneinfo import ZoneInfo
+
+    from packages.shared.email_alerts import control
+
+    sub, campaign, old = await alert(db)
+    ipo = await db.get(m.IPO, campaign.ipo_id)
+    company = await db.get(m.Company, ipo.company_id)
+    company.is_demo = False
+    ipo.status = "OPEN"
+    ipo.raw_status = "OPEN"
+    ipo.price_high = Decimal("100")
+    sub.gmp_band = "gold"
+    dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
+    today = m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+    dates.open_date = today
+    dates.listing_date = today + timedelta(days=7)
+    guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
+    if not guide:
+        guide = m.ApplicantGuide(ipo_id=ipo.id)
+        db.add(guide)
+    guide.schedule_status = "CONFIRMED"
+    guide.verification_status = "VERIFIED"
+    quote = m.GMP(
+        ipo_id=ipo.id,
+        value=Decimal("101"),
+        observed_at=m.now(),
+        source_provider="TEST",
+        source_url="https://example.com/gmp",
+        import_key="opening-band-regression",
+    )
+    db.add(quote)
+    state = await control(db)
+    state.sending_enabled = True
+    await db.commit()
+    await prepare(db)
+    await prepare(db)
+    opening = await db.scalar(select(m.EmailCampaign).where(m.EmailCampaign.kind == "ipo_opening"))
+    rows = (
+        await db.scalars(select(m.EmailDelivery).where(m.EmailDelivery.campaign_id == opening.id))
+    ).all()
+    assert len(rows) == 1
+    row = rows[0]
+    sent = []
+    monkeypatch.setattr(
+        "apps.worker.email_alerts.ses_send", lambda *args: sent.append(args) or "opening-message"
+    )
+    quote.value = Decimal("100")
+    await db.commit()
+    await send_one(db, row.id, approved=True)
+    await db.refresh(row)
+    assert not sent and row.status == "PENDING" and row.attempt_count == 0
+    quote.value = Decimal("101")
+    row.retry_at = None
+    await db.commit()
+    await send_one(db, row.id, approved=True)
+    assert len(sent) == 1 and "Opens Today" in sent[0][1]
+    await send_one(db, row.id, approved=True)
+    assert len(sent) == 1
+    # Explicit preferences must never receive the legacy listing-day campaign.
+    await send_one(db, old.id, approved=True)
+    assert len(sent) == 1

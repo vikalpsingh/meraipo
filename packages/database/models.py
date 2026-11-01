@@ -654,6 +654,8 @@ class CompanyResultSource(Base):
 # Email subscriptions are separate from market-data ingestion and its schedules.
 class EmailSubscriber(Entity, Base):
     __tablename__ = "email_subscribers"
+    contact_encrypted: Mapped[str | None] = mapped_column(Text)
+    gmp_band: Mapped[str | None] = mapped_column(String(20), index=True)
     email_hash: Mapped[str] = mapped_column(String(64), unique=True)
     email_encrypted: Mapped[str] = mapped_column(Text)
     consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -673,6 +675,7 @@ class EmailCampaign(Entity, Base):
 
 class EmailDelivery(Entity, Base):
     __tablename__ = "email_deliveries"
+    requested_profile_encrypted: Mapped[str | None] = mapped_column(Text)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     last_event: Mapped[str | None] = mapped_column(String(30))

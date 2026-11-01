@@ -13,10 +13,10 @@
 ## Deployment
 
 1. Back up PostgreSQL. Deploy backend and web together; run `python -m alembic upgrade head` (new revision `20261031_email_alerts`). Compose's migrate service already does this before API/worker start. Do not enable sending before the migration and notification endpoint are ready.
-2. Keep `EMAIL_ALERTS_ENABLED=false` initially. Set stable, separate random `EMAIL_TOKEN_SECRET` and `CONFIG_ENCRYPTION_KEY` values of at least 32 characters through your secret manager. Do not rotate either casually: the former identifies subscribers and generates links; the latter decrypts stored addresses. Use the exact public HTTPS origin, without a trailing slash, for `PUBLIC_ORIGIN` and `SITE_URL`.
+2. Keep the MeraAdmin email alerts feature toggle OFF initially. Set stable, separate random `EMAIL_TOKEN_SECRET` and `CONFIG_ENCRYPTION_KEY` values of at least 32 characters through your secret manager. Do not rotate either casually: the former identifies subscribers and generates links; the latter decrypts stored addresses. Use the exact public HTTPS origin, without a trailing slash, for `PUBLIC_ORIGIN` and `SITE_URL`.
 3. In Amazon SES, verify your sending domain, configure DKIM/SPF/DMARC, obtain production sending access and choose `EMAIL_FROM`. Set `SES_REGION`, `SES_CONFIGURATION_SET` and a dedicated `SES_SNS_TOPIC_ARN`. Attach the configuration set's Send, Delivery, Bounce, Complaint, Reject and DeliveryDelay events to that SNS topic. Subscribe HTTPS endpoint `https://<your-domain>/api/v1/ipo-alerts/ses-events`. Signature-verified subscription confirmation uses `sns:ConfirmSubscription` for this topic only. Grant worker `ses:SendEmail` for the sender/configuration set and API `sns:ConfirmSubscription` on that topic using the AWS SDK credential chain / IAM role. Topic policy must restrict publishing to your SES account.
 4. If open tracking is desired, enable SES Open events AND `EMAIL_OPEN_TRACKING_ENABLED=true`. Otherwise keep SES open tracking off. Open rates are affected by privacy proxies and cannot prove human reading. SES click tracking should stay off; the application owns click redirects.
-5. For Docker, attach the IAM role/credential provider appropriate to the host. Compose intentionally does not embed AWS credentials. For local testing, pass SDK credentials only via a private override or secrets mount. Restart API, worker and scheduler after configuration; set `EMAIL_ALERTS_ENABLED=true` only when ready. Keep a single beat scheduler. The migration never enables email sending.
+5. For Docker, attach the IAM role/credential provider appropriate to the host. Compose intentionally does not embed AWS credentials. For local testing, pass SDK credentials only via a private override or secrets mount. Restart API, worker and scheduler after configuration; enable the MeraAdmin email alerts feature toggle when ready. Keep a single beat scheduler. The migration never enables email sending.
 6. Verify using your own consenting test address: register, receive confirmation, explicitly confirm, check a fixture IPO opening today, receive one reminder, click and unsubscribe. Verify signed SNS delivery/suppression callbacks and dashboard counts. No real subscriber emails are sent by the regression tests.
 
 ## Optional GA4
@@ -51,7 +51,7 @@ Validation performed: 19 focused backend tests and 7 focused UI tests passed; fr
 
 ## Opening-day GMP alerts and MeraAdmin toggle
 
-MeraAdmin → Feature releases → **IPO opening-day email alerts** controls public signup and the worker. New installations default OFF. Server `EMAIL_ALERTS_ENABLED=true` and valid SES setup are prerequisites for enabling this toggle. Disable pauses queued mail (an SES request already in progress may complete); confirmation/unsubscribe links and analytics remain available. Re-enable sends only reminders still scheduled for the current opening day; obsolete listing reminders are cancelled.
+MeraAdmin → Feature releases → **IPO opening-day email alerts** controls public signup and the worker. New installations default OFF. The toggle can be changed without a server restart. Valid SES configuration is still required to send mail. Disable pauses queued mail (an SES request already in progress may complete); confirmation/unsubscribe links and analytics remain available. Re-enable sends only reminders still scheduled for the current opening day; obsolete listing reminders are cancelled.
 
 The opening-day message includes the most recent stored GMP observation no later than send time, amount in rupees, observed time in IST, provider and a stale label using `GMP_TTL_HOURS`. Missing GMP is explicitly unavailable; zero and negative GMP remain valid values. The email does not claim GMP predicts or guarantees listing performance. Campaign attribution is `ipo_opening`; historical `ipo_prelisting` links/reports remain supported.
 
@@ -62,3 +62,27 @@ Use `EMAIL_FROM=IPO@meraipo.com` once that address or the `meraipo.com` domain i
 The public website uses measurement ID `G-ZYEKCCV3J5` through the existing single `AnalyticsConsent` component. It loads only after analytics consent, tracks sanitized public page views on navigation, and excludes admin/email-preference pages. No second inline snippet is needed. `GA4_MEASUREMENT_ID` overrides the default; an explicitly empty value disables the tag. Restart/redeploy web to apply environment changes.
 
 This measurement ID enables browser collection, not server-side reporting access. MeraAdmin traffic reports still require the numeric `GA4_PROPERTY_ID` and a server-only service-account credential file. After deployment, allow analytics and verify the visit in this property's Realtime report. Live receipt has not been verified from this workspace.
+
+
+## Opening-day GMP subscriptions
+
+Apply migration `20261101_email_preferences` before deploying the API/worker changes.
+The homepage shortcut follows the broker bar and respects the existing `email_alerts` release flag.
+First/last names and email are required; phone is optional. A single GMP band is mandatory.
+Contact data and pending verification profiles are encrypted. Confirmation applies a staged
+preference update; posting another person's email cannot overwrite their active preferences.
+No contact details enter analytics or public URLs. Phone is not used for calls or SMS.
+
+New subscribers receive `ipo_opening` alerts only, from the configured IST send hour until
+midnight on the confirmed, verified IPO opening date. GMP is divided by the upper price band:
+white <=20% or missing/stale, light green >20–40%, strong green >40–100%, gold >100%.
+The latest nonfuture snapshot is rechecked before dispatch. A changed band defers the pending
+message for ten minutes; it can send only if it matches again on the same opening day.
+There is at most one accepted alert per subscriber/IPO/campaign kind; ambiguous SES sends
+retain the existing no-automatic-retry policy. All existing suppression and production gates apply.
+Legacy subscribers with no selected band retain pre-listing alerts until they confirm a new
+preference. No preferences are inferred or backfilled. Existing subscribers can use the same
+form to request a confirmed change. Pending confirmation requests are limited to one per 24h.
+
+Deploy migration, API, web and worker together. Do not enable public signup until SES readiness,
+admin test delivery and production controls have been reviewed as documented in `ses-production.md`.

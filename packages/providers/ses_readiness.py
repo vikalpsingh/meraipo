@@ -55,12 +55,7 @@ async def readiness(refresh=False):
         "remaining_quota": None,
         "sender": sender(),
     }
-    if (
-        not c.email_alerts_enabled
-        or not c.ses_configuration_set
-        or not c.ses_sns_topic_arn
-        or "<" in c.ses_sns_topic_arn
-    ):
+    if not c.ses_configuration_set or not c.ses_sns_topic_arn or "<" in c.ses_sns_topic_arn:
         return data
     address = parseaddr(c.email_from)[1]
     if address != "alerts@meraipo.com" or not c.public_origin.startswith("https://"):

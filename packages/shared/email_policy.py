@@ -15,7 +15,7 @@ async def production_checks(db, refresh=False):
     aws = await readiness(refresh)
     test = await db.get(m.EmailDelivery, state.test_delivery_id) if state.test_delivery_id else None
     checks = {
-        "server_permission": c.email_alerts_enabled and c.ipo_email_sending_enabled,
+        "server_permission": c.ipo_email_sending_enabled,
         "signup_feature": await feature_enabled(db),
         "aws_readiness": aws["ready"],
         "scheduler_healthy": bool(

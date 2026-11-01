@@ -2503,3 +2503,19 @@ body:has(.company-preview[open]) {
 .email-analytics button, .email-signup button, .analytics-consent button { min-height: 44px; }
 .analytics-consent { margin-top: 1rem; }
 @media(max-width:640px) { .email-charts { grid-template-columns: 1fr; } .email-signup { margin: 1rem; } }
+
+.listing-gain-subscription { position: relative; margin: 0 0 1.5rem; }
+.subscription-link { background: none; color: var(--accent, #146b59); text-decoration: underline; padding: .65rem 0; border: 0; cursor: pointer; min-height: 44px; }
+.subscription-risk { display: none; max-width: 42rem; padding: .75rem; background: #f4f6f8; color: #17323d; border: 1px solid #ccd6d9; border-radius: .5rem; }
+.subscription-link:hover + .subscription-risk, .subscription-link:focus + .subscription-risk { display: block; }
+.subscription-dialog { width: min(38rem, calc(100vw - 2rem)); max-height: 90dvh; overflow-y: auto; border: 1px solid #ccd6d9; border-radius: 1rem; padding: 1rem; }
+.subscription-dialog::backdrop { background: rgb(0 0 0 / 50%); }
+.subscription-close { display: block; margin-left: auto; min-height: 44px; }
+.gmp-preferences { margin: 1rem 0; border: 1px solid #ccd6d9; border-radius: .5rem; }
+.gmp-preferences label { display: flex; align-items: center; gap: .65rem; min-height: 44px; padding: .4rem; }
+.gmp-preferences input[type="radio"] { width: auto; flex: 0 0 auto; }
+.subscription-link:focus-visible, .subscription-close:focus-visible, .gmp-preferences input:focus-visible { outline: 3px solid #2675bd; outline-offset: 3px; }
+
+.email-signup input:not([type=checkbox]):not([type=radio]) { width: 100%; min-height: 44px; }
+.email-signup .gmp-preferences label { display: flex; }
+.subscription-dialog .email-signup { margin: 0; padding: .75rem; }

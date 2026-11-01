@@ -22,7 +22,6 @@ from packages.shared.market_config import encrypt_secret
 @pytest.fixture
 async def setup_email(db, monkeypatch):
     for key, value in {
-        "email_alerts_enabled": True,
         "ipo_email_sending_enabled": True,
         "email_token_secret": SecretStr("test-email-operations-secret-more-than-32"),
         "email_from": "alerts@meraipo.com",
@@ -220,7 +219,7 @@ async def test_admin_auth_and_sns_header_mismatch(client):
 async def test_readiness_missing_config_does_not_call_aws(monkeypatch):
     from packages.providers.ses_readiness import readiness
 
-    monkeypatch.setattr(settings(), "email_alerts_enabled", False)
+    monkeypatch.setattr(settings(), "ses_sns_topic_arn", "")
 
     class Cache:
         async def get(self, key):
@@ -269,7 +268,6 @@ async def test_readiness_checks_aws_and_dns(monkeypatch):
     from packages.providers.ses_readiness import readiness
 
     for key, value in {
-        "email_alerts_enabled": True,
         "email_from": "alerts@meraipo.com",
         "public_origin": "https://meraipo.com",
         "ses_configuration_set": "meraipo-ipo-alerts",
@@ -388,7 +386,7 @@ async def test_crashed_sends_are_reconciled_even_with_bulk_off(db, setup_email):
 
 
 async def test_control_center_status_unconfigured(admin_client, monkeypatch):
-    monkeypatch.setattr(settings(), "email_alerts_enabled", False)
+    monkeypatch.setattr(settings(), "ses_sns_topic_arn", "")
     response = await admin_client.get("/api/v1/admin/email/status")
     assert response.status_code == 200, response.text
     value = response.json()

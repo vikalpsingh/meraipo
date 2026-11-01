@@ -25,7 +25,19 @@ def eligible_listing(ipo, dates, guide, today):
     )
 
 
-async def content(db, ipo_id, public_url, unsubscribe_url, test=False):
+def eligible_opening(ipo, dates, guide, today):
+    return bool(
+        dates
+        and dates.open_date == today
+        and ipo.status.upper() in ("OPEN", "UPCOMING")
+        and (ipo.raw_status or "").upper() not in ("CANCELLED", "POSTPONED", "WITHDRAWN")
+        and guide
+        and guide.schedule_status == "CONFIRMED"
+        and guide.verification_status == "VERIFIED"
+    )
+
+
+async def content(db, ipo_id, public_url, unsubscribe_url, test=False, opening=False):
     ipo = await db.get(m.IPO, ipo_id)
     if not ipo:
         raise ValueError("IPO_NOT_FOUND")
@@ -43,8 +55,16 @@ async def content(db, ipo_id, public_url, unsubscribe_url, test=False):
         .order_by(m.Subscription.observed_at.desc())
         .limit(1)
     )
-    price = ipo.issue_price if ipo.issue_price is not None else ipo.price_high
-    price_label = "Issue price" if ipo.issue_price is not None else "Upper price band (assumption)"
+    price = (
+        ipo.price_high
+        if opening
+        else (ipo.issue_price if ipo.issue_price is not None else ipo.price_high)
+    )
+    price_label = (
+        "Issue price"
+        if ipo.issue_price is not None and not opening
+        else "Upper price band (assumption)"
+    )
     premium = gmp.value if gmp else None
     percent = premium / price * 100 if premium is not None and price and price > 0 else None
     stale = bool(gmp and m.now() - utc(gmp.observed_at) > timedelta(hours=settings().gmp_ttl_hours))
@@ -53,7 +73,10 @@ async def content(db, ipo_id, public_url, unsubscribe_url, test=False):
         return f"₹{n:,.2f}" if n is not None else "N/A"
 
     rows = [
-        ("Listing date", str(dates.listing_date) if dates and dates.listing_date else "N/A"),
+        (
+            "Opening date" if opening else "Listing date",
+            str(dates.open_date if opening else dates.listing_date) if dates else "N/A",
+        ),
         (price_label, money(price)),
         ("Unofficial GMP", money(premium) + (" · stale snapshot" if stale else "")),
         ("GMP-implied gain (assumption)", f"{percent:+.2f}%" if percent is not None else "N/A"),
@@ -84,8 +107,9 @@ async def content(db, ipo_id, public_url, unsubscribe_url, test=False):
     )
     disclaimer = "GMP is unofficial. The estimated gain assumes the stated GMP over the issue price or upper band; it is not a guaranteed listing price or return. IPO investing involves loss risk. Verify dates and data before deciding."
     subject = (
-        "TEST — " if test else ""
-    ) + f"MeraIPO | {company.name} Lists Tomorrow — Key IPO Details"
+        ("TEST — " if test else "")
+        + f"MeraIPO | {company.name} {'Opens Today' if opening else 'Lists Tomorrow'} — Key IPO Details"
+    )
     text = (
         subject
         + "\n\n"
