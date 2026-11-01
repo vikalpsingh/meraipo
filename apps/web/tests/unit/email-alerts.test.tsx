@@ -1,0 +1,61 @@
+import { StrictMode } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { EmailSubscription } from '../../components/email-subscription';
+import { AnalyticsConsent } from '../../components/analytics-consent';
+vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
+vi.mock('next/script', () => ({
+  default: ({ src }: { src: string }) => <span data-testid="ga-script">{src}</span>,
+}));
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  localStorage.clear();
+  window.history.replaceState(null, '', '/');
+});
+it('requires explicit consent and submits only email and consent', async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ message: 'Check your inbox.' }) });
+  vi.stubGlobal('fetch', fetch);
+  render(<EmailSubscription />);
+  expect(screen.getByRole('checkbox')).not.toBeChecked();
+  expect(screen.getByRole('checkbox')).toBeRequired();
+  fireEvent.change(screen.getByLabelText('Email address'), {
+    target: { value: 'person@example.com' },
+  });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Subscribe to IPO alerts' }));
+  await screen.findByText('Check your inbox.');
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+    email: 'person@example.com',
+    consent: true,
+  });
+});
+it('preserves a private confirmation token through strict-mode effects without auto-confirming', async () => {
+  const token = 'a'.repeat(64);
+  window.history.replaceState(null, '', '/email-alerts/verify#' + token);
+  const fetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ message: 'Confirmed.' }) });
+  vi.stubGlobal('fetch', fetch);
+  render(
+    <StrictMode>
+      <EmailSubscription action="verify" />
+    </StrictMode>,
+  );
+  expect(window.location.hash).toBe('');
+  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm subscription' }));
+  await screen.findByText('Confirmed.');
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ token });
+});
+it('does not load Google until optional consent and supports withdrawal', async () => {
+  render(<AnalyticsConsent measurementId="G-TEST123" />);
+  expect(screen.queryByTestId('ga-script')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Allow analytics' }));
+  await screen.findByTestId('ga-script');
+  fireEvent.click(screen.getByRole('button', { name: 'Disable website analytics' }));
+  await waitFor(() => expect(screen.queryByTestId('ga-script')).toBeNull());
+  expect(localStorage.getItem('meraipo-analytics-consent')).toBe('denied');
+});

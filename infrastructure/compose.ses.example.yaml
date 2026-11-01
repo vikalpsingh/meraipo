@@ -1,0 +1,14 @@
+# Copy to /secure/compose.ses.yaml on Lightsail; do not put credentials in this file.
+services:
+  api:
+    environment:
+      AWS_SHARED_CREDENTIALS_FILE: /run/secrets/aws-credentials
+      AWS_PROFILE: api
+    volumes:
+      - /secure/meraipo-api.aws:/run/secrets/aws-credentials:ro
+  worker:
+    environment:
+      AWS_SHARED_CREDENTIALS_FILE: /run/secrets/aws-credentials
+      AWS_PROFILE: worker
+    volumes:
+      - /secure/meraipo-worker.aws:/run/secrets/aws-credentials:ro

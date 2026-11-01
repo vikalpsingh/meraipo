@@ -7,6 +7,8 @@ import { MarketConsole } from '@/components/market-console';
 import { MarketConfig } from '@/components/market-config';
 import { JobErrorLog } from '@/components/job-error-log';
 import { FeedbackInbox } from '@/components/feedback-inbox';
+import { EmailControlCenter } from '@/components/email-control-center';
+import { EmailAlertsAnalytics } from '@/components/email-alerts-analytics';
 import { ClickAnalytics } from '@/components/click-analytics';
 import { FeatureControls } from '@/components/feature-controls';
 type Session = { email: string; csrf_token: string };
@@ -257,6 +259,7 @@ export default function Console() {
           'Data & scheduler',
           'Config',
           'Analytics',
+          'Email Alerts Analytics',
           'Customer feedback',
           'IPOs',
           'Applicant guides',
@@ -288,6 +291,12 @@ export default function Console() {
         <MarketConsole csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
       {tab === 'Analytics' && <ClickAnalytics />}
+      {tab === 'Email Alerts Analytics' && (
+        <>
+          <EmailControlCenter csrf={session.csrf_token} companies={dashboard?.companies || []} />
+          <EmailAlertsAnalytics />
+        </>
+      )}
       {tab === 'Config' && session && <MarketConfig csrf={session.csrf_token} />}
       {tab === 'Dashboard' && dashboard && (
         <>

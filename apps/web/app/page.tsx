@@ -65,6 +65,30 @@ export default async function Home({
           <h2>{String(title)}</h2>
           <span>{(items as Company[]).length} issues</span>
         </div>
+        {id === 'open' && (
+          <aside className="gmp-legend" aria-label="GMP colour legend">
+            <strong>Row colours · GMP %</strong>
+            <ul>
+              {[
+                ['neutral', 'White', '20% or below, or unavailable'],
+                ['light-green', 'Light green', 'Above 20% to 40%'],
+                ['dark-green', 'Stronger green', 'Above 40% to 100%'],
+                ['gold', 'Gold', 'Above 100%'],
+              ].map(([tone, colour, meaning]) => (
+                <li key={tone}>
+                  <span className={`gmp-legend-swatch ipo-gmp--${tone}`} aria-hidden="true" />
+                  <span>
+                    <b>{colour}:</b> {meaning}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p>
+              GMP % = grey-market premium ÷ IPO upper price band × 100. Unofficial; not a guaranteed
+              listing gain. Check the quote timestamp for freshness.
+            </p>
+          </aside>
+        )}
         {(items as Company[]).length ? (
           <div>
             <IPOInterestTable companies={items as Company[]} today={today} />

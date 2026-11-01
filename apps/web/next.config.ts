@@ -6,7 +6,10 @@ const config: NextConfig = {
   turbopack: { root: process.cwd() },
   poweredByHeader: false,
   async rewrites() {
-    return [{ source: '/api/v1/:path*', destination: `${api}/api/v1/:path*` }];
+    return [
+      { source: '/api/v1/:path*', destination: `${api}/api/v1/:path*` },
+      { source: '/api/ipo-alerts/:path*', destination: `${api}/api/v1/ipo-alerts/:path*` },
+    ];
   },
   async headers() {
     return [
@@ -20,9 +23,9 @@ const config: NextConfig = {
           {
             key: 'Content-Security-Policy',
             value:
-              "default-src 'self'; script-src 'self' 'unsafe-inline'" +
+              "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com" +
               (process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '') +
-              "; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; font-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+              "; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com; font-src 'self'; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
           },
           ...(process.env.NODE_ENV === 'production' && process.env.SITE_URL?.startsWith('https:')
             ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]

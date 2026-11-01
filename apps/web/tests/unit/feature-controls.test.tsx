@@ -54,3 +54,24 @@ it('keeps the switch hidden and reports failed saves', async () => {
   await screen.findByText(/Could not save/);
   expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
 });
+
+it('explains SES setup requirements without enabling opening-day alerts', async () => {
+  const email = { ...item, key: 'email_alerts', label: 'IPO opening-day email alerts' };
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [email] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: { message: 'Configure SES before enabling email alerts.' } }),
+      }),
+  );
+  render(<FeatureControls csrf="test-token" />);
+  fireEvent.click(await screen.findByRole('switch', { name: email.label }));
+  await screen.findByText(/Configure SES before enabling/);
+  expect(screen.getByRole('switch', { name: email.label })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
+});

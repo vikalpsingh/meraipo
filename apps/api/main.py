@@ -20,6 +20,9 @@ from apps.api import repository as repo
 from apps.api.ad_images import LogoError, fetch_logo
 from apps.api.analytics_routes import router as analytics_router
 from apps.api.bhavcopy_routes import router as bhavcopy_router
+from apps.api.email_admin import router as email_admin_router
+from apps.api.email_analytics import router as email_analytics_router
+from apps.api.email_routes import router as email_router
 from apps.api.feature_routes import require_feature
 from apps.api.feature_routes import router as feature_router
 from apps.api.feedback_routes import router as feedback_router
@@ -53,6 +56,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(email_router, prefix="/api/v1")
+app.include_router(email_admin_router, prefix="/api/v1")
+app.include_router(email_analytics_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(feature_router)
 app.include_router(market_router, prefix="/api/v1")
@@ -94,7 +100,10 @@ async def observe(request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        logger.exception(json.dumps({"event": "request_failed", "request_id": request_id}))
+        logger.error(
+            json.dumps({"event": "request_failed", "request_id": request_id}),
+            exc_info="/ipo-alerts/" not in request.url.path,
+        )
         response = JSONResponse(
             {
                 "error": {
@@ -110,7 +119,9 @@ async def observe(request, call_next):
             "X-Request-ID": request_id,
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
-            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Referrer-Policy": "no-referrer"
+            if "/ipo-alerts/" in request.url.path
+            else "strict-origin-when-cross-origin",
             "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
             "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
         }
@@ -134,7 +145,9 @@ async def observe(request, call_next):
             {
                 "event": "http_request",
                 "request_id": request_id,
-                "path": request.url.path,
+                "path": "/api/v1/ipo-alerts/[redacted]"
+                if "/ipo-alerts/" in request.url.path
+                else request.url.path,
                 "method": request.method,
                 "status": response.status_code,
                 "duration_ms": round((time.monotonic() - started) * 1000, 2),

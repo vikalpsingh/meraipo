@@ -88,7 +88,7 @@ const pages: Record<string, { title: string; intro: string; sections: [string, s
   },
   privacy: {
     title: 'Privacy',
-    intro: 'V1 has no public registration, portfolio connection or broker integration.',
+    intro: 'Public research needs no account. Optional email alerts require a verified email address.',
     sections: [
       [
         'What the service stores',
@@ -99,12 +99,16 @@ const pages: Record<string, { title: string; intro: string; sections: [string, s
         'We count link and button clicks by broad page section and day, retaining totals for 400 days. This analytics feature stores no visitor identifiers, click text, full URLs or analytics cookies. It excludes administrator pages and respects the browser Do Not Track setting.',
       ],
       [
+        'Email alerts and retention',
+        'We encrypt email addresses, record consent and confirmation, and use Amazon SES to deliver reminders. Delivery, bounce, complaint and link events support delivery reporting; raw events are retained for up to 400 days by default. Subscriber preferences and delivery records remain until an operator handles a deletion request. Unsubscribe in any alert, or contact us for deletion. We never send email addresses to Google Analytics.',
+      ],
+      [
         'What we do not request',
         'Do not send PAN, demat, UPI, bank or broker credentials. Public research does not require personal investment information.',
       ],
       [
         'Deployment configuration',
-        'The operator must publish its contact details, retention periods and hosting/subprocessor information before a public production launch. No third-party analytics or advertising tracker is used.',
+        'The operator must publish its contact details, retention periods and hosting/subprocessor information before a public production launch. When configured, Google Analytics runs only after optional analytics consent. You can change that choice in the footer. Admin and email-preference pages are excluded.',
       ],
     ],
   },

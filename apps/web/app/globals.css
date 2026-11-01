@@ -2087,20 +2087,57 @@ body:has(.company-preview[open]) {
 
 /* Carry the GMP bands across the row; green shades keep black text readable. */
 .ipo-interest-table .ipo-gmp--neutral,
+.gmp-legend .ipo-gmp--neutral,
 .ipo-card.ipo-gmp--neutral {
   --gmp-row-background: #ffffff;
 }
 .ipo-interest-table .ipo-gmp--light-green,
+.gmp-legend .ipo-gmp--light-green,
 .ipo-card.ipo-gmp--light-green {
   --gmp-row-background: #dcfce7;
 }
 .ipo-interest-table .ipo-gmp--dark-green,
+.gmp-legend .ipo-gmp--dark-green,
 .ipo-card.ipo-gmp--dark-green {
   --gmp-row-background: #86efac;
 }
 .ipo-interest-table .ipo-gmp--gold,
+.gmp-legend .ipo-gmp--gold,
 .ipo-card.ipo-gmp--gold {
   --gmp-row-background: #f5cf62;
+}
+.gmp-legend {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+.gmp-legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+.gmp-legend li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.gmp-legend-swatch {
+  flex: 0 0 16px;
+  height: 16px;
+  border: 1px solid #81928e;
+  border-radius: 3px;
+  background: var(--gmp-row-background);
+}
+.gmp-legend p {
+  margin: 0;
+  font-size: 12px;
+  color: #49606f;
 }
 .ipo-card {
   background: var(--gmp-row-background, #ffffff);
@@ -2443,3 +2480,26 @@ body:has(.company-preview[open]) {
     padding: 16px;
   }
 }
+
+/* Email preferences and aggregate admin reporting. */
+.email-signup { max-width: 42rem; margin: 2rem auto; padding: 1.5rem; }
+.email-signup label { display: grid; gap: .5rem; margin: 1rem 0; }
+.email-signup input[type=email] { width: 100%; min-height: 44px; }
+.email-signup .email-consent { display: flex; align-items: flex-start; gap: .75rem; }
+.email-signup .email-consent input { flex: 0 0 auto; width: 20px; height: 20px; }
+.email-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; margin: 1rem 0; }
+.email-filters label { display: grid; gap: .35rem; }
+.email-kpis { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: .8rem; }
+.email-kpis .panel { padding: 1rem; }
+.email-kpis strong { display: block; font-size: 1.6rem; margin-top: .5rem; }
+.email-charts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin: 1.5rem 0; }
+.email-chart { padding: 1rem; min-width: 0; }
+.email-chart-bars { max-height: 240px; overflow-y: auto; }
+.email-bar { display: grid; grid-template-columns: 100px 1fr 65px; gap: .4rem; align-items: center; font-size: .8rem; margin: .4rem 0; }
+.email-bar meter { width: 100%; accent-color: #167c6b; }
+.email-analytics small { display: block; }
+.email-analytics table { min-width: 850px; }
+.email-analytics .table-scroll { overflow: auto; }
+.email-analytics button, .email-signup button, .analytics-consent button { min-height: 44px; }
+.analytics-consent { margin-top: 1rem; }
+@media(max-width:640px) { .email-charts { grid-template-columns: 1fr; } .email-signup { margin: 1rem; } }

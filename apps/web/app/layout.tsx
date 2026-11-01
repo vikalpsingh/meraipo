@@ -4,6 +4,7 @@ import './globals.css';
 import { SiteNavigation } from '@/components/site-navigation';
 import { features } from '@/lib/features';
 import { ClickTracker } from '@/components/click-tracker';
+import { AnalyticsConsent } from '@/components/analytics-consent';
 import { Brand } from '@/components/brand';
 const origin = process.env.SITE_URL || 'http://localhost:3000';
 export const metadata: Metadata = {
@@ -49,13 +50,19 @@ export default async function Layout({ children }: { children: React.ReactNode }
               <Brand />
             </Link>
             <nav aria-label="Information">
-              {['methodology', 'data-sources', 'disclaimer', 'privacy', 'terms', 'contact'].map(
-                (path) => (
-                  <Link key={path} href={'/' + path}>
-                    {path.replace('-', ' ')}
-                  </Link>
-                ),
-              )}
+              {[
+                ...(flags.email_alerts ? ['email-alerts'] : []),
+                'methodology',
+                'data-sources',
+                'disclaimer',
+                'privacy',
+                'terms',
+                'contact',
+              ].map((path) => (
+                <Link key={path} href={'/' + path}>
+                  {path.replace('-', ' ')}
+                </Link>
+              ))}
             </nav>
           </div>
           <p>
@@ -67,6 +74,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
             MeraIPO provides IPO, market and company information for research and educational
             purposes. It does not guarantee IPO allotment, listing gains or investment returns.
           </p>
+          <AnalyticsConsent measurementId={process.env.GA4_MEASUREMENT_ID ?? 'G-ZYEKCCV3J5'} />
         </footer>
       </body>
     </html>

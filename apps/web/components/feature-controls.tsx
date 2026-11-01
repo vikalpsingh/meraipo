@@ -35,8 +35,8 @@ export function FeatureControls({ csrf }: { csrf: string }) {
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify({ enabled: !feature.enabled }),
       });
-      if (!response.ok) throw new Error('Save failed');
       const saved = await response.json();
+      if (!response.ok) throw new Error(saved.error?.message || 'Save failed');
       setItems((current) =>
         current.map((item) =>
           item.key === saved.key ? { ...item, enabled: saved.enabled } : item,
@@ -44,8 +44,12 @@ export function FeatureControls({ csrf }: { csrf: string }) {
       );
       setStatus(`${feature.label} is now ${saved.enabled ? 'live' : 'hidden'}.`);
       router.refresh();
-    } catch {
-      setStatus('Could not save. The feature state has not been changed here; reload to verify.');
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? `Could not save. ${error.message}`
+          : 'Could not save. Reload to verify the feature state.',
+      );
     } finally {
       setBusy(null);
     }

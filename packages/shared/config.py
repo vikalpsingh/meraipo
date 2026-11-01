@@ -14,6 +14,24 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     public_origin: str = "http://localhost:3000"
     demo_mode: bool = False
+    email_alerts_enabled: bool = False
+    email_from: str = "alerts@meraipo.com"
+    email_from_name: str = "MeraIPO Alerts"
+    ipo_email_sending_enabled: bool = False
+    email_batch_size: int = Field(default=20, ge=1, le=100)
+    email_max_per_second: float = Field(default=1, gt=0, le=20)
+    email_catchup_hours: int = Field(default=4, ge=1, le=12)
+    email_max_attempts: int = Field(default=5, ge=1, le=10)
+    email_unsubscribe_days: int = Field(default=400, ge=30, le=730)
+    email_token_secret: SecretStr = SecretStr("")
+    ses_region: str = "ap-south-1"
+    ses_configuration_set: str = "meraipo-ipo-alerts"
+    ses_sns_topic_arn: str = ""
+    email_open_tracking_enabled: bool = False
+    email_send_hour_ist: int = Field(default=8, ge=0, le=23)
+    email_event_retention_days: int = Field(default=400, ge=90, le=730)
+    ga4_property_id: str = ""
+    ga4_service_account_file: str = ""
     session_hours: int = 8
     cache_ttl: int = 60
     gmp_ttl_hours: int = 12
@@ -50,6 +68,25 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_configuration(self):
+        if self.email_alerts_enabled:
+            from urllib.parse import urlsplit
+
+            origin = urlsplit(self.public_origin)
+            if (
+                len(self.email_token_secret.get_secret_value()) < 32
+                or len(self.config_encryption_key.get_secret_value() or self.cron_secret) < 32
+                or not self.email_from
+                or not self.ses_configuration_set
+                or not self.ses_sns_topic_arn
+                or origin.scheme not in ("http", "https")
+                or not origin.netloc
+                or origin.path not in ("", "/")
+                or origin.query
+                or origin.fragment
+            ):
+                raise ValueError(
+                    "Email alerts require sender, SES configuration set/topic, stable token/encryption secrets and a public origin"
+                )
         if self.environment == "production":
             if self.demo_mode or not self.public_origin.startswith("https://"):
                 raise ValueError("Production requires HTTPS and demo_mode=false")

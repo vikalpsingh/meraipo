@@ -17,6 +17,7 @@ config = settings()
 celery = Celery("meraipo", broker=config.redis_url, backend=config.redis_url)
 celery.conf.update(
     timezone="Asia/Kolkata",
+    imports=("apps.worker.email_alerts",),
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
@@ -32,6 +33,12 @@ celery.conf.update(
         }.items()
     },
 )
+
+# Independent email outbox; disabled unless explicitly configured.
+celery.conf.beat_schedule["email-alert-outbox"] = {
+    "task": "meraipo.email_tick",
+    "schedule": crontab(minute="*"),
+}
 
 
 @celery.task(

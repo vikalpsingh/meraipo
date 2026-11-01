@@ -649,3 +649,89 @@ class CompanyResultSource(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     approved_by: Mapped[str] = mapped_column(ForeignKey("admin_users.id"))
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+# Email subscriptions are separate from market-data ingestion and its schedules.
+class EmailSubscriber(Entity, Base):
+    __tablename__ = "email_subscribers"
+    email_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    email_encrypted: Mapped[str] = mapped_column(Text)
+    consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    unsubscribed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    suppressed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EmailCampaign(Entity, Base):
+    __tablename__ = "email_campaigns"
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(30), default="ipo_prelisting")
+    scheduled_date: Mapped[date] = mapped_column(Date, index=True)
+    __table_args__ = (UniqueConstraint("ipo_id", "kind", "scheduled_date"),)
+
+
+class EmailDelivery(Entity, Base):
+    __tablename__ = "email_deliveries"
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_event: Mapped[str | None] = mapped_column(String(30))
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    subscriber_id: Mapped[str] = mapped_column(ForeignKey("email_subscribers.id"), index=True)
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("email_campaigns.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
+    message_id: Mapped[str | None] = mapped_column(String(200), unique=True)
+    click_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    action_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    clicked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unsubscribed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(60))
+    __table_args__ = (UniqueConstraint("subscriber_id", "campaign_id"),)
+
+
+class EmailClickEvent(Entity, Base):
+    __tablename__ = "email_click_events"
+    delivery_id: Mapped[str] = mapped_column(ForeignKey("email_deliveries.id"), index=True)
+    ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), index=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("email_campaigns.id"), index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    classification: Mapped[str] = mapped_column(String(30))
+
+
+class EmailDeliveryEvent(Base):
+    __tablename__ = "email_delivery_events"
+    provider_event_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    delivery_id: Mapped[str] = mapped_column(ForeignKey("email_deliveries.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class EmailReservation(Base):
+    __tablename__ = "email_reservations"
+    subscriber_id: Mapped[str] = mapped_column(ForeignKey("email_subscribers.id"), primary_key=True)
+    ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), primary_key=True)
+    alert_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+
+
+class EmailControl(Base):
+    __tablename__ = "email_control"
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="email")
+    sending_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    scheduler_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_owner: Mapped[str | None] = mapped_column(String(36))
+    test_delivery_id: Mapped[str | None] = mapped_column(ForeignKey("email_deliveries.id"))
+    test_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    test_config_hash: Mapped[str | None] = mapped_column(String(64))
+
+
+class EmailDispatchRun(Entity, Base):
+    __tablename__ = "email_dispatch_runs"
+    status: Mapped[str] = mapped_column(String(30), default="RUNNING")
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processed: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(80))

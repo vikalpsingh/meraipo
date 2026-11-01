@@ -9,7 +9,11 @@ async def test_flags_default_hidden(client, db, monkeypatch):
     await db.commit()
     monkeypatch.setitem(FEATURES, "future_tab", {"label": "Future", "description": "Future"})
     response = await client.get("/api/v1/site/features")
-    assert response.json()["features"] == {"ipo_tracker": False, "future_tab": False}
+    assert response.json()["features"] == {
+        "email_alerts": False,
+        "ipo_tracker": False,
+        "future_tab": False,
+    }
     assert (await client.get("/api/v1/tracker")).status_code == 404
 
 
