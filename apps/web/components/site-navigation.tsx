@@ -1,7 +1,13 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-export function SiteNavigation({ trackerEnabled = false }: { trackerEnabled?: boolean }) {
+export function SiteNavigation({
+  trackerEnabled = false,
+  emailEnabled = false,
+}: {
+  trackerEnabled?: boolean;
+  emailEnabled?: boolean;
+}) {
   const path = usePathname();
   return (
     <nav aria-label="Main navigation">
@@ -9,6 +15,7 @@ export function SiteNavigation({ trackerEnabled = false }: { trackerEnabled?: bo
         ['/', 'Home'],
         ...(trackerEnabled ? [['/tracker', 'IPO Tracker']] : []),
         ['/ipo-status', 'IPO Status'],
+        ...(emailEnabled ? [['/email-alerts', 'IPO Alerts']] : []),
         ['/about', 'About / Methodology'],
       ].map(([href, label]) => (
         <Link

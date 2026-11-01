@@ -1,4 +1,3 @@
-import { ListingGainSubscription } from '@/components/listing-gain-subscription';
 import { BrokerShortcuts } from '@/components/broker-shortcuts';
 import Link from 'next/link';
 import { api } from '@/lib/api';
@@ -108,7 +107,6 @@ export default async function Home({
   return (
     <main className="ipo-home">
       <BrokerShortcuts />
-      {flags.email_alerts && <ListingGainSubscription companies={[...open.items, ...scheduled]} asOf={now.getTime()} />}
       <div className="page-heading">
         <div>
           <p className="eyebrow">THE PRIMARY MARKET</p>

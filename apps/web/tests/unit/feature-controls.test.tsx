@@ -75,3 +75,10 @@ it('explains SES setup requirements without enabling opening-day alerts', async 
     'false',
   );
 });
+
+it('shows the IPO Alerts navigation tab only when enabled', () => {
+  const view = render(<SiteNavigation />);
+  expect(screen.queryByRole('link', { name: 'IPO Alerts' })).toBeNull();
+  view.rerender(<SiteNavigation emailEnabled />);
+  expect(screen.getByRole('link', { name: 'IPO Alerts' })).toHaveAttribute('href', '/email-alerts');
+});

@@ -33,7 +33,10 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <Link href="/" className="brand" aria-label="MeraIPO home">
             <Brand />
           </Link>
-          <SiteNavigation trackerEnabled={flags.ipo_tracker === true} />
+          <SiteNavigation
+            trackerEnabled={flags.ipo_tracker === true}
+            emailEnabled={flags.email_alerts === true}
+          />
           <span className="header-label">INDIA · LONG-TERM RESEARCH</span>
         </header>
         {process.env.NEXT_PUBLIC_DEMO_MODE === 'true' && (

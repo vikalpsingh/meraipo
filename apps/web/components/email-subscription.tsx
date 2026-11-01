@@ -125,14 +125,13 @@ export function EmailSubscription({
               <fieldset className="gmp-preferences">
                 <legend>What would you like to follow? Choose one.</legend>
                 {[
-                  ['white', 'neutral', 'All IPOs: every GMP level, including unavailable'],
-                  ['light_green', 'light-green', 'Light green: above 20%'],
-                  ['strong_green', 'dark-green', 'Stronger green: above 40%'],
-                  ['gold', 'gold', 'Gold: above 100%'],
-                ].map(([value, tone, label]) => (
+                  ['white', 'All IPOs: every GMP level, including unavailable'],
+                  ['light_green', 'Light green: above 20%'],
+                  ['strong_green', 'Stronger green: above 40%'],
+                  ['gold', 'Gold: above 100%'],
+                ].map(([value, label]) => (
                   <label key={value}>
                     <input type="radio" name="gmp_band" value={value} required />
-                    <span className={`gmp-legend-swatch ipo-gmp--${tone}`} aria-hidden="true" />
                     {label}
                   </label>
                 ))}

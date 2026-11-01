@@ -70,44 +70,9 @@ it('does not load Google until optional consent and supports withdrawal', async 
   expect(localStorage.getItem('meraipo-analytics-consent')).toBe('denied');
 });
 
-it('opens the automatic dialog without a homepage subscription link', () => {
-  const show = vi.fn(function (this: HTMLDialogElement) {
-    this.setAttribute('open', '');
-  });
-  const close = vi.fn(function (this: HTMLDialogElement) {
-    this.removeAttribute('open');
-    this.dispatchEvent(new Event('close'));
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value: show,
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: close });
-  document.cookie = 'meraipo-alert-prompt=; Max-Age=0; Path=/';
+it('renders the standalone subscription page without a popup', () => {
   render(<ListingGainSubscription />);
-  expect(screen.queryByRole('button', { name: /Listing gain email subscription/ })).toBeNull();
-  expect(show).toHaveBeenCalledOnce();
-  expect(screen.getByRole('dialog')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Do it later · Close ✕' }));
-  expect(close).toHaveBeenCalledOnce();
-  expect(window.location.pathname).toBe('/');
-  show.mockRestore();
-  close.mockRestore();
-});
-
-it('automatically invites a new visitor once and remembers it without contact details', () => {
-  document.cookie = 'meraipo-alert-prompt=; Max-Age=0; Path=/';
-  const show = vi.fn(function (this: HTMLDialogElement) {
-    this.setAttribute('open', '');
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value: show,
-  });
-  const first = render(<ListingGainSubscription />);
-  expect(show).toHaveBeenCalledOnce();
-  expect(document.cookie).toContain('meraipo-alert-prompt=seen');
-  first.unmount();
-  render(<ListingGainSubscription />);
-  expect(show).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Your next IPO starts here' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: /Do it later/ })).toBeNull();
 });

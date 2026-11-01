@@ -67,7 +67,7 @@ This measurement ID enables browser collection, not server-side reporting access
 ## Opening-day GMP subscriptions
 
 Apply migration `20261101_email_preferences` before deploying the API/worker changes.
-The homepage popup opens once per browser (a non-identifying, one-year preference cookie remembers display/dismissal/submission); visitors can use the footer email-alerts page to subscribe later. Cookies contain no contact details. Example gains use actual fresh homepage GMP with explicitly hypothetical budgets, not minimum lots. The automatic homepage popup respects the existing `email_alerts` release flag.
+The public **IPO Alerts** navigation tab opens `/email-alerts`, gated by the existing email feature toggle. The colourful signup and current-open-IPO GMP examples are displayed inline. The homepage no longer opens a popup or writes the old popup preference cookie.
 First/last names and email are required; phone is optional. A single GMP band is mandatory.
 Contact data and pending verification profiles are encrypted. Confirmation applies a staged
 preference update; posting another person's email cannot overwrite their active preferences.
