@@ -83,10 +83,13 @@ export default async function Home({
                 </li>
               ))}
             </ul>
-            <p>
-              GMP % = grey-market premium ÷ IPO upper price band × 100. Unofficial; not a guaranteed
-              listing gain. Check the quote timestamp for freshness.
-            </p>
+            <details className="legend-explainer">
+              <summary>How GMP colours work</summary>
+              <p>
+                GMP % = grey-market premium ÷ IPO upper price band × 100. Unofficial; not a
+                guaranteed listing gain. Check the quote timestamp for freshness.
+              </p>
+            </details>
           </aside>
         )}
         {(items as Company[]).length ? (
@@ -106,7 +109,6 @@ export default async function Home({
   }
   return (
     <main className="ipo-home">
-      <BrokerShortcuts />
       <div className="page-heading">
         <div>
           <p className="eyebrow">THE PRIMARY MARKET</p>
@@ -124,12 +126,21 @@ export default async function Home({
           <IPOSearch key={query} query={query} />
         </div>
       </div>
+      <BrokerShortcuts />
       {query ? (
         <p className="search-feedback" role="status">
           {total} {total === 1 ? 'company' : 'companies'} matching “{query}”
         </p>
       ) : (
-        <TodayActions now={now} companies={[...open.items, ...upcoming.items, ...recent.items]} />
+        <details className="home-agenda">
+          <summary>
+            <span>Today’s IPO calendar</span>
+            <span>
+              Closing, allotment &amp; listing dates <span aria-hidden="true">⌄</span>
+            </span>
+          </summary>
+          <TodayActions now={now} companies={[...open.items, ...upcoming.items, ...recent.items]} />
+        </details>
       )}
       {!query && (
         <div className="market-counts">

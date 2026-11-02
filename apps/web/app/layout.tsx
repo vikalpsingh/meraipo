@@ -1,3 +1,4 @@
+import { PublicSurface } from '@/components/public-surface';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import './globals.css';
@@ -25,60 +26,62 @@ export default async function Layout({ children }: { children: React.ReactNode }
   return (
     <html lang="en">
       <body>
-        <ClickTracker />
-        <a className="skip-link" href="#main">
-          Skip to content
-        </a>
-        <header className="site-header">
-          <Link href="/" className="brand" aria-label="MeraIPO home">
-            <Brand />
-          </Link>
-          <SiteNavigation
-            trackerEnabled={flags.ipo_tracker === true}
-            emailEnabled={flags.email_alerts === true}
-          />
-          <span className="header-label">INDIA · LONG-TERM RESEARCH</span>
-        </header>
-        {process.env.NEXT_PUBLIC_DEMO_MODE === 'true' && (
-          <div className="demo-banner">
-            DEMO EDITION <span>Fictional companies and fixture values. No live market data.</span>
-          </div>
-        )}
-        <div id="main" tabIndex={-1}>
-          {children}
-        </div>
-        <footer>
-          <div className="footer-top">
-            <Link className="brand" href="/" aria-label="MeraIPO home">
+        <PublicSurface>
+          <ClickTracker />
+          <a className="skip-link" href="#main">
+            Skip to content
+          </a>
+          <header className="site-header">
+            <Link href="/" className="brand" aria-label="MeraIPO home">
               <Brand />
             </Link>
-            <nav aria-label="Information">
-              {[
-                ...(flags.email_alerts ? ['email-alerts'] : []),
-                'methodology',
-                'data-sources',
-                'disclaimer',
-                'privacy',
-                'terms',
-                'contact',
-              ].map((path) => (
-                <Link key={path} href={'/' + path}>
-                  {path.replace('-', ' ')}
-                </Link>
-              ))}
-            </nav>
+            <SiteNavigation
+              trackerEnabled={flags.ipo_tracker === true}
+              emailEnabled={flags.email_alerts === true}
+            />
+            <span className="header-label">INDIA · LONG-TERM RESEARCH</span>
+          </header>
+          {process.env.NEXT_PUBLIC_DEMO_MODE === 'true' && (
+            <div className="demo-banner">
+              DEMO EDITION <span>Fictional companies and fixture values. No live market data.</span>
+            </div>
+          )}
+          <div id="main" tabIndex={-1}>
+            {children}
           </div>
-          <p>
-            <strong>Market data disclaimer:</strong> Market prices are populated from the latest
-            available BSE and NSE data feeds. These are not live quotes; refer to the displayed
-            price date.
-          </p>
-          <p>
-            MeraIPO provides IPO, market and company information for research and educational
-            purposes. It does not guarantee IPO allotment, listing gains or investment returns.
-          </p>
-          <AnalyticsConsent measurementId={process.env.GA4_MEASUREMENT_ID ?? 'G-ZYEKCCV3J5'} />
-        </footer>
+          <footer>
+            <div className="footer-top">
+              <Link className="brand" href="/" aria-label="MeraIPO home">
+                <Brand />
+              </Link>
+              <nav aria-label="Information">
+                {[
+                  ...(flags.email_alerts ? ['email-alerts'] : []),
+                  'methodology',
+                  'data-sources',
+                  'disclaimer',
+                  'privacy',
+                  'terms',
+                  'contact',
+                ].map((path) => (
+                  <Link key={path} href={'/' + path}>
+                    {path.replace('-', ' ')}
+                  </Link>
+                ))}
+              </nav>
+            </div>
+            <p>
+              <strong>Market data disclaimer:</strong> Market prices are populated from the latest
+              available BSE and NSE data feeds. These are not live quotes; refer to the displayed
+              price date.
+            </p>
+            <p>
+              MeraIPO provides IPO, market and company information for research and educational
+              purposes. It does not guarantee IPO allotment, listing gains or investment returns.
+            </p>
+            <AnalyticsConsent measurementId={process.env.GA4_MEASUREMENT_ID ?? 'G-ZYEKCCV3J5'} />
+          </footer>
+        </PublicSurface>
       </body>
     </html>
   );

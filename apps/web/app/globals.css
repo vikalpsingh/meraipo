@@ -2557,3 +2557,74 @@ body:has(.company-preview[open]) {
 
 .subscription-page { max-width: 1050px; margin: 2rem auto; border-radius: 20px; overflow: hidden; background: #fff; border: 1px solid #d5dfdb; box-shadow: 0 12px 40px #17323d12; }
 .subscription-page .email-signup { margin: 0; padding: 28px; border: 0; border-radius: 0; box-shadow: none; }
+
+/* Public research experience. Deliberately excludes MeraAdmin. */
+.public-surface {
+  --primary: #12624b; --ring: #12624b; --border: #dce6e3;
+  background: linear-gradient(180deg, #edf5f2 0, #f7f9fa 360px);
+  color: #18332f; min-height: 100vh;
+}
+.public-surface .site-header { background: #fff; border-bottom: 1px solid #dce6e3; gap: 20px; }
+.public-surface .site-header nav { gap: 6px; }
+.public-surface .site-header nav a { padding: 8px 13px; border-radius: 8px; font-weight: 600; font-size: 14px; }
+.public-surface .site-header nav a[aria-current='page'] { background: #e6f3ec; color: #105b46; box-shadow: inset 0 -2px #12624b; }
+.public-surface .site-header nav a:hover { background: #f0f6f3; }
+.public-surface main { padding-top: 24px; }
+.public-surface .page-heading { gap: 20px; margin-bottom: 24px; }
+.public-surface h1 { letter-spacing: -.035em; color: #133c33; line-height: 1.15; }
+.public-surface h2 { letter-spacing: -.02em; }
+.public-surface .eyebrow { color: #23765b; font-weight: 700; letter-spacing: .14em; }
+.public-surface .panel { border-color: #dce6e3; border-radius: 14px; box-shadow: 0 3px 14px #133c3305; }
+.public-surface .outline-button { border-color: #bdd1c9; border-radius: 9px; background: #fff; color: #214b3e; }
+.public-surface .outline-button:hover { background: #edf7f1; border-color: #49896f; }
+.public-surface .primary-button { border-radius: 9px; background: #12624b; color: #fff; }
+.public-surface :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { border-radius: 9px; border-color: #c5d8d0; background-color: #fff; }
+.public-surface :is(input,select,textarea):focus-visible { outline: 3px solid #a8d8c3; outline-offset: 2px; }
+.public-surface :is(.filters,.screen-tabs) { border-radius: 12px; }
+.public-surface .screen-tabs { gap: 8px; padding: 8px 0; }
+.public-surface .screen-tabs a { border-radius: 8px; }
+.public-surface .data-table th { background: #edf4f1; color: #355b4e; font-size: 12px; letter-spacing: .02em; }
+.public-surface .data-table td { font-variant-numeric: tabular-nums; }
+.public-surface .data-table tbody tr:hover { outline: 1px solid #9fc7b7; outline-offset: -1px; }
+.public-surface .section-heading { gap: 12px; }
+.public-surface .dark-stat { background: linear-gradient(135deg,#103b35,#17664d); border-radius: 14px; }
+.public-surface .prose { max-width: 900px; }
+.public-surface .prose section { padding: 20px 24px; background: #fff; border: 1px solid #dce6e3; border-radius: 14px; margin: 16px 0; }
+.public-surface .breadcrumb { color: #56756a; font-size: 13px; }
+.public-surface footer { background: #edf3f0; border-top: 1px solid #dce6e3; }
+.public-surface .ipo-home .page-heading { margin: 0 0 14px; align-items: center; }
+.public-surface .ipo-home .page-heading h1 { font-size: clamp(26px,3vw,36px); margin: 3px 0; }
+.public-surface .ipo-home .page-heading p { margin: 4px 0; }
+.public-surface .ipo-home .broker-shortcuts { display: grid; grid-template-columns: minmax(200px,.9fr) 2fr; gap: 16px; align-items: center; margin: 0 0 12px; padding: 12px 16px; }
+.public-surface .ipo-home .broker-shortcuts-intro h2 { font-size: 14px; margin: 0; }
+.public-surface .ipo-home .broker-shortcuts-intro p { font-size: 11px; margin: 3px 0 0; }
+.public-surface .ipo-home .broker-shortcut { min-height: 48px; padding: 7px 10px; gap: 8px; }
+.public-surface .ipo-home .broker-shortcut-name { font-size: 12px; }
+.public-surface .ipo-home .broker-shortcuts-links { gap: 8px; }
+.public-surface .home-agenda { border-bottom: 1px solid #dce6e3; margin-bottom: 8px; }
+.public-surface .home-agenda > summary { display: flex; justify-content: space-between; gap: 12px; align-items: center; min-height: 44px; cursor: pointer; color: #205d48; font-size: 13px; font-weight: 600; }
+.public-surface .home-agenda > summary > span:last-child { font-weight: 400; font-size: 12px; }
+.public-surface .home-agenda .today-actions { margin: 0 0 12px; }
+.public-surface .ipo-home .market-counts { margin: 0 0 14px; padding: 8px 0; border-top: 0; gap: 18px; }
+.public-surface .ipo-home .ipo-section > .section-heading { margin: 12px 0 10px; }
+.public-surface .ipo-home .gmp-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 10px 14px; margin-bottom: 10px; font-size: 12px; background: #fff; }
+.public-surface .ipo-home .gmp-legend ul { margin: 0; gap: 8px 16px; }
+.public-surface .legend-explainer { font-size: 11px; }
+.public-surface .legend-explainer summary { color: #386957; cursor: pointer; min-height: 24px; }
+.public-surface .legend-explainer[open] { flex-basis: 100%; }
+@media(max-width: 800px) {
+  .public-surface .site-header { gap: 10px; }
+  .public-surface .site-header nav { flex-wrap: wrap; }
+  .public-surface .site-header nav a { padding: 7px 10px; font-size: 13px; }
+  .public-surface main { padding-top: 16px; }
+  .public-surface .ipo-home .broker-shortcuts { grid-template-columns: 1fr; gap: 8px; padding: 10px 12px; }
+  .public-surface .ipo-home .broker-shortcuts-intro { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+  .public-surface .ipo-home .broker-shortcuts-links { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .public-surface .ipo-home .page-heading { flex-wrap: wrap; gap: 8px; }
+  .public-surface .ipo-home .market-counts { gap: 8px 14px; }
+  .public-surface .ipo-home .gmp-legend ul { display: grid; grid-template-columns: 1fr 1fr; width: 100%; font-size: 11px; }
+  .public-surface .home-agenda > summary { flex-wrap: wrap; gap: 2px; padding: 8px 0; }
+}
+@media(prefers-reduced-motion: no-preference) {
+  .public-surface :is(.outline-button,.site-header nav a) { transition: background-color .15s ease, border-color .15s ease; }
+}
