@@ -9,6 +9,12 @@ from packages.database import models as m
 from packages.shared.calculations import utc
 from packages.shared.config import settings
 
+CATEGORY_LABELS = {
+    "white": "All IPOs",
+    "light_green": "Above 20%",
+    "strong_green": "Above 40%",
+    "gold": "Above 100%",
+}
 BANDS = ("white", "light_green", "strong_green", "gold")
 
 

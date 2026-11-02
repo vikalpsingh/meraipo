@@ -517,6 +517,9 @@ async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
     await db.commit()
     await send_one(db, row.id, approved=True)
     assert len(sent) == 1 and "Opens Today" in sent[0][1]
+    assert 'src="cid:ipo-price-chart"' in sent[0][5]
+    assert sent[0][6].startswith(b"\x89PNG\r\n\x1a\n")
+    assert "GMP observed" in sent[0][5]
     await send_one(db, row.id, approved=True)
     assert len(sent) == 1
     # Explicit preferences must never receive the legacy listing-day campaign.

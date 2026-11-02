@@ -42,9 +42,18 @@ type Status = {
 };
 const date = (value: string | null) =>
   value ? new Date(value).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST' : 'N/A';
+const categories = [
+  ['white', 'All IPOs'],
+  ['light_green', 'Above 20% GMP'],
+  ['strong_green', 'Above 40% GMP'],
+  ['gold', 'Above 100% GMP'],
+] as const;
+
 export function EmailControlCenter({ csrf, companies }: { csrf: string; companies: Company[] }) {
   const [data, setData] = useState<Status | null>(null);
   const [days, setDays] = useState('30');
+  const [recipient, setRecipient] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
   const [ipo, setIpo] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -233,9 +242,68 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
             </button>
           </div>
           <p>
-            A test sends only to your administrator email. SES sandbox requires a verified
-            recipient. This does not enable production sending.
+            The inbox readiness test sends to your signed-in administrator address. SES sandbox
+            requires a verified recipient. This does not enable production sending.
           </p>
+          <form
+            className="panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void action('category-tests', 'POST', {
+                ipo_id: ipo,
+                email: recipient.trim(),
+                categories: selected,
+              });
+            }}
+          >
+            <h3>Send category test emails</h3>
+            <p>
+              Choose an IPO above. Each selected category sends one test with its current data and
+              shows whether its GMP meets that preference.
+            </p>
+            <label>
+              Test recipient email
+              <input
+                required
+                type="email"
+                maxLength={254}
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+              />
+            </label>
+            <fieldset>
+              <legend>Test categories</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selected.length === categories.length}
+                  onChange={(e) =>
+                    setSelected(e.target.checked ? categories.map(([key]) => key) : [])
+                  }
+                />
+                Select all four categories
+              </label>
+              {categories.map(([key, label]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(key)}
+                    onChange={(e) =>
+                      setSelected((previous) =>
+                        e.target.checked
+                          ? [...previous, key]
+                          : previous.filter((item) => item !== key),
+                      )
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+            <button type="submit" disabled={busy || !ipo || !recipient.trim() || !selected.length}>
+              Queue {selected.length} test email{selected.length === 1 ? '' : 's'}
+            </button>
+          </form>
           {preview && (
             <details open>
               <summary>{preview.subject}</summary>

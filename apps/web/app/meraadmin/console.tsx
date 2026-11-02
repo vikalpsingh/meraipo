@@ -259,6 +259,7 @@ export default function Console() {
           'Data & scheduler',
           'Config',
           'Analytics',
+          'Email Control Center',
           'Email Alerts Analytics',
           'Customer feedback',
           'IPOs',
@@ -291,12 +292,10 @@ export default function Console() {
         <MarketConsole csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
       {tab === 'Analytics' && <ClickAnalytics />}
-      {tab === 'Email Alerts Analytics' && (
-        <>
-          <EmailControlCenter csrf={session.csrf_token} companies={dashboard?.companies || []} />
-          <EmailAlertsAnalytics />
-        </>
+      {tab === 'Email Control Center' && (
+        <EmailControlCenter csrf={session.csrf_token} companies={dashboard?.companies || []} />
       )}
+      {tab === 'Email Alerts Analytics' && <EmailAlertsAnalytics />}
       {tab === 'Config' && session && <MarketConfig csrf={session.csrf_token} />}
       {tab === 'Dashboard' && dashboard && (
         <>

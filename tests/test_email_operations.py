@@ -394,3 +394,38 @@ async def test_control_center_status_unconfigured(admin_client, monkeypatch):
     assert value["readiness"]["aws"]["status"] == "NOT_CONFIGURED"
     assert value["counts"]["SCHEDULED"] == 0
     assert "email_encrypted" not in response.text
+
+
+async def test_admin_category_batch_sends_four_distinct_tests(
+    admin_client, db, setup_email, monkeypatch
+):
+    from packages.shared.email_preferences import BANDS, CATEGORY_LABELS
+
+    ipo, *_, state = setup_email
+    monkeypatch.setattr(settings(), "public_origin", "https://meraipo.com")
+    monkeypatch.setattr(
+        "apps.api.email_admin.readiness",
+        AsyncMock(return_value={"checks": {"identity_verified": True, "sending_allowed": True}}),
+    )
+    admin_client.headers["origin"] = settings().public_origin
+    payload = {"ipo_id": ipo.id, "email": "tester@example.com", "categories": list(BANDS)}
+    response = await admin_client.post("/api/v1/admin/email/category-tests", json=payload)
+    assert response.status_code == 202, response.text
+    ids = response.json()["ids"]
+    assert len(set(ids)) == 4
+    sent = []
+    monkeypatch.setattr(
+        "apps.worker.email_alerts.ses_send", lambda *args: sent.append(args) or f"test-{len(sent)}"
+    )
+    for key in ids:
+        await send_one(db, key)
+    assert len(sent) == 4
+    for args, band in zip(sent, BANDS, strict=True):
+        assert args[0] == "tester@example.com"
+        assert args[1].startswith(f"TEST — {CATEGORY_LABELS[band]} |")
+        assert "Latest GMP matches this preference" in args[2]
+    assert (
+        await admin_client.post("/api/v1/admin/email/category-tests", json=payload)
+    ).status_code == 429
+    await db.refresh(state)
+    assert state.test_delivery_id is None

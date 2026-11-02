@@ -173,7 +173,9 @@ def opening_gmp(gmp):
     return f"GMP: ₹{gmp.value:,.2f} per share. {freshness}.\nObserved: {stamp.astimezone(ZoneInfo('Asia/Kolkata')).strftime('%d %b %Y, %I:%M %p')} IST. Source: {source}."
 
 
-def ses_send(destination, subject, text, unsubscribe, delivery_id, markup_override=None):
+def ses_send(
+    destination, subject, text, unsubscribe, delivery_id, markup_override=None, chart_png=None
+):
     config = settings()
     origin = config.public_origin.rstrip("/")
 
@@ -193,6 +195,17 @@ def ses_send(destination, subject, text, unsubscribe, delivery_id, markup_overri
             "Html": {"Data": markup_override or "<p>" + markup + "</p>", "Charset": "UTF-8"},
         },
     }
+    if chart_png:
+        simple["Attachments"] = [
+            {
+                "RawContent": chart_png,
+                "FileName": "ipo-price-chart.png",
+                "ContentType": "image/png",
+                "ContentDisposition": "INLINE",
+                "ContentId": "ipo-price-chart",
+                "ContentTransferEncoding": "BASE64",
+            }
+        ]
     if unsubscribe:
         simple["Headers"] = [
             {"Name": "List-Unsubscribe", "Value": "<" + unsubscribe + ">"},
@@ -253,6 +266,7 @@ async def send_one(db, key, approved=False):
     action = token(row.id, "action")
     unsubscribe = None
     markup = None
+    chart_png = None
     if row.kind == "VERIFY":
         if token_expired(row):
             row.status = "EXPIRED"
@@ -303,8 +317,16 @@ async def send_one(db, key, approved=False):
         company = await db.get(m.Company, ipo.company_id)
         from packages.shared.email_alerts import tracked_url
 
+        category = (
+            campaign.kind.split(":")[1]
+            if row.kind == "TEST" and campaign.kind.startswith("category:")
+            else None
+        )
+        opening = campaign.kind == "ipo_opening" or category is not None
         public_url = tracked_url(
-            origin + "/ipo/" + company.slug, company.slug, campaign=campaign.kind
+            origin + "/ipo/" + company.slug,
+            company.slug,
+            campaign="ipo_opening" if opening else CAMPAIGN,
         )
         unsubscribe = origin + "/api/ipo-alerts/unsubscribe/" + action
         template = await content(
@@ -313,8 +335,11 @@ async def send_one(db, key, approved=False):
             public_url,
             origin + "/email-alerts/unsubscribe#" + action,
             test=row.kind == "TEST",
-            opening=campaign.kind == "ipo_opening",
+            opening=opening,
+            test_category=category,
+            inline_attachment=True,
         )
+        chart_png = template.get("chart_png")
         subject, text, markup = template["subject"], template["text"], template["html"]
     try:
         message_id = await asyncio.to_thread(
@@ -325,6 +350,7 @@ async def send_one(db, key, approved=False):
             unsubscribe,
             row.id,
             markup,
+            chart_png,
         )
         await db.execute(
             update(m.EmailDelivery)

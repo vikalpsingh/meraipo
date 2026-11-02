@@ -1,10 +1,11 @@
 """Authenticated email operations; test mail targets only the signed-in administrator."""
 
 from datetime import timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, StrictBool
+from pydantic import BaseModel, Field, StrictBool
 from sqlalchemy import func, select
 
 from apps.api.feedback_routes import insert_for
@@ -22,6 +23,7 @@ from packages.shared.email_alerts import (
     tracked_url,
 )
 from packages.shared.email_policy import production_checks
+from packages.shared.email_preferences import BANDS
 from packages.shared.email_template import content
 from packages.shared.market_config import encrypt_secret
 
@@ -199,8 +201,14 @@ async def preview(ipo_id: str, auth=Depends(admin), db=Depends(get_session)):
     )
 
 
-@router.post("/test", status_code=202)
-async def test_email(data: TestRequest, auth=Depends(admin), db=Depends(get_session)):
+class CategoryTestRequest(TestRequest):
+    email: str = Field(max_length=254)
+    categories: list[str] = Field(min_length=1, max_length=4)
+
+
+async def require_test_sender():
+    if len(settings().email_token_secret.get_secret_value()) < 32:
+        raise HTTPException(409, "Configure the email token secret before testing.")
     aws = await readiness(True)
     if (
         not settings().public_origin.startswith("https://")
@@ -210,15 +218,9 @@ async def test_email(data: TestRequest, auth=Depends(admin), db=Depends(get_sess
         raise HTTPException(
             409, "Configure HTTPS and a verified, enabled SES sender before sending a test."
         )
-    ipo = await db.get(m.IPO, data.ipo_id)
-    if not ipo:
-        raise HTTPException(404, "IPO not found")
-    state = await control(db, lock=True)
-    if state.test_delivery_id:
-        previous = await db.get(m.EmailDelivery, state.test_delivery_id)
-        if previous and utc(previous.created_at) > m.now() - timedelta(minutes=5):
-            raise HTTPException(429, "Wait five minutes between test emails.")
-    address = normalized_email(auth[0].email)
+
+
+async def test_recipient(db, address):
     identity = token(address, "email")
     await db.execute(
         insert_for(db, m.EmailSubscriber)
@@ -229,7 +231,71 @@ async def test_email(data: TestRequest, auth=Depends(admin), db=Depends(get_sess
         select(m.EmailSubscriber).where(m.EmailSubscriber.email_hash == identity)
     )
     if subscriber.suppressed_at:
-        raise HTTPException(409, "This administrator address is suppressed.")
+        raise HTTPException(409, "This recipient address is suppressed.")
+    return subscriber
+
+
+@router.post("/category-tests", status_code=202)
+async def category_tests(data: CategoryTestRequest, auth=Depends(admin), db=Depends(get_session)):
+    if len(set(data.categories)) != len(data.categories) or any(
+        c not in BANDS for c in data.categories
+    ):
+        raise HTTPException(422, "Choose each email category at most once.")
+    try:
+        address = normalized_email(data.email)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await require_test_sender()
+    if not await db.get(m.IPO, data.ipo_id):
+        raise HTTPException(404, "IPO not found")
+    await control(db, lock=True)
+    recent = await db.scalar(
+        select(m.EmailCampaign.id)
+        .where(
+            m.EmailCampaign.kind.startswith("category:"),
+            m.EmailCampaign.created_at > m.now() - timedelta(minutes=5),
+        )
+        .limit(1)
+    )
+    if recent:
+        raise HTTPException(429, "Wait five minutes between category test batches.")
+    sub = await test_recipient(db, address)
+    ids = []
+    for category in data.categories:
+        campaign = m.EmailCampaign(
+            ipo_id=data.ipo_id,
+            kind=f"category:{category}:{uuid4().hex[:8]}",
+            scheduled_date=m.now().astimezone(ZoneInfo("Asia/Kolkata")).date(),
+        )
+        db.add(campaign)
+        await db.flush()
+        row = delivery(sub.id, campaign.id)
+        row.kind = "TEST"
+        db.add(row)
+        ids.append(row.id)
+    audit(
+        db,
+        auth,
+        "email.category_test",
+        {"deliveries": ids, "categories": data.categories, "ipo_id": data.ipo_id},
+    )
+    await db.commit()
+    return {"message": f"Queued {len(ids)} category test email(s).", "ids": ids}
+
+
+@router.post("/test", status_code=202)
+async def test_email(data: TestRequest, auth=Depends(admin), db=Depends(get_session)):
+    await require_test_sender()
+    ipo = await db.get(m.IPO, data.ipo_id)
+    if not ipo:
+        raise HTTPException(404, "IPO not found")
+    state = await control(db, lock=True)
+    if state.test_delivery_id:
+        previous = await db.get(m.EmailDelivery, state.test_delivery_id)
+        if previous and utc(previous.created_at) > m.now() - timedelta(minutes=5):
+            raise HTTPException(429, "Wait five minutes between test emails.")
+    address = normalized_email(auth[0].email)
+    subscriber = await test_recipient(db, address)
     campaign = m.EmailCampaign(
         ipo_id=ipo.id,
         kind="test_" + token(str(m.now()), "test")[:20],
