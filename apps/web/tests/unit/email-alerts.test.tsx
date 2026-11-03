@@ -4,12 +4,18 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EmailSubscription } from '../../components/email-subscription';
 import { AnalyticsConsent } from '../../components/analytics-consent';
-vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
+const route = vi.hoisted(() => ({ path: '/' }));
+vi.mock('next/navigation', () => ({ usePathname: () => route.path }));
 vi.mock('next/script', () => ({
-  default: ({ src }: { src: string }) => <span data-testid="ga-script">{src}</span>,
+  default: ({ src, onReady }: { src: string; onReady: () => void }) => (
+    <button data-testid="ga-script" onClick={onReady}>
+      {src}
+    </button>
+  ),
 }));
 afterEach(() => {
   cleanup();
+  route.path = '/';
   vi.unstubAllGlobals();
   localStorage.clear();
   window.history.replaceState(null, '', '/');
@@ -75,4 +81,30 @@ it('renders the standalone subscription page without a popup', () => {
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(screen.getByRole('heading', { name: 'Your next IPO starts here' })).toBeVisible();
   expect(screen.queryByRole('button', { name: /Do it later/ })).toBeNull();
+});
+
+it('records consented public navigation once per pathname and excludes private routes', async () => {
+  localStorage.setItem('meraipo-analytics-consent', 'granted');
+  const view = render(<AnalyticsConsent measurementId="G-TEST123" />);
+  fireEvent.click(await screen.findByTestId('ga-script'));
+  const ga = window as Window & { dataLayer?: ArrayLike<unknown>[] };
+  try {
+    for (const path of [
+      '/tracker',
+      '/email-alerts',
+      '/email-alerts/verify',
+      '/email-alerts/unsubscribe',
+      '/meraadmin',
+      '/feedback',
+    ]) {
+      route.path = path;
+      view.rerender(<AnalyticsConsent measurementId="G-TEST123" />);
+    }
+    const locations = ga.dataLayer
+      ?.filter((command) => command[1] === 'page_view')
+      .map((command) => new URL((command[2] as { page_location: string }).page_location).pathname);
+    expect(locations).toEqual(['/', '/tracker', '/email-alerts', '/feedback']);
+  } finally {
+    delete ga.dataLayer;
+  }
 });

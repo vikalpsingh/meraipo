@@ -29,6 +29,7 @@ const companies = [{ id: 'company', ipo_id: 'ipo', name: 'Fixture IPO' } as Comp
 it('shows unavailable setup and prevents activating production', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => status }));
   render(<EmailControlCenter csrf="token" companies={companies} />);
+  fireEvent.click(screen.getByText('Advanced tests, production settings and delivery reports'));
   expect(await screen.findByRole('switch')).toBeDisabled();
   expect(screen.getByText(/NOT CONFIGURED/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Send one TEST to my admin email' })).toBeDisabled();
@@ -49,6 +50,7 @@ it('requires preview before an explicit test request and passes CSRF', async () 
     .mockResolvedValue({ ok: true, json: async () => status });
   vi.stubGlobal('fetch', fetcher);
   render(<EmailControlCenter csrf="token" companies={companies} />);
+  fireEvent.click(screen.getByText('Advanced tests, production settings and delivery reports'));
   await screen.findByRole('switch');
   fireEvent.change(screen.getByLabelText('IPO'), { target: { value: 'ipo' } });
   fireEvent.click(screen.getByRole('button', { name: 'Preview HTML and text' }));
@@ -62,6 +64,26 @@ it('requires preview before an explicit test request and passes CSRF', async () 
       method: 'POST',
       headers: expect.objectContaining({ 'X-CSRF-Token': 'token' }),
       body: '{"ipo_id":"ipo"}',
+    }),
+  );
+});
+
+it('queues one sample from the recipient field with advanced settings closed', async () => {
+  const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => status });
+  vi.stubGlobal('fetch', fetcher);
+  render(<EmailControlCenter csrf="token" companies={companies} />);
+  expect(
+    screen.getByText('Advanced tests, production settings and delivery reports').closest('details'),
+  ).not.toHaveAttribute('open');
+  fireEvent.change(screen.getByLabelText('Recipient email address'), {
+    target: { value: 'tester@example.com' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Send sample email' }));
+  expect(await screen.findByText(/One sample email queued for tester@example.com/)).toBeVisible();
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/v1/admin/email/category-tests',
+    expect.objectContaining({
+      body: JSON.stringify({ ipo_id: 'ipo', email: 'tester@example.com', categories: ['white'] }),
     }),
   );
 });

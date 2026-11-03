@@ -10,7 +10,7 @@ export function AnalyticsConsent({ measurementId }: { measurementId: string }) {
   const pathname = usePathname();
   const [consent, setConsent] = useState('');
   const [ready, setReady] = useState(false);
-  const excluded = pathname.startsWith('/meraadmin') || pathname.startsWith('/email-alerts');
+  const excluded = pathname.startsWith('/meraadmin') || pathname.startsWith('/email-alerts/');
   const configured = /^G-[A-Z0-9]+$/.test(measurementId);
   useEffect(() => {
     try {
@@ -29,27 +29,32 @@ export function AnalyticsConsent({ measurementId }: { measurementId: string }) {
     const location = new URL(window.location.origin + pathname);
     const source = new URLSearchParams(window.location.search);
     // Only fixed attribution values and the actual public IPO slug may reach Google.
-    if (source.get('utm_source') === 'meraipo_email' && /^\/ipo\/[a-z0-9-]+$/.test(pathname)) {
+    if (
+      source.get('utm_source') === 'meraipo_email' &&
+      (pathname === '/' || /^\/ipo\/[a-z0-9-]+$/.test(pathname))
+    ) {
       location.search = new URLSearchParams({
         utm_source: 'meraipo_email',
         utm_medium: 'email',
         utm_campaign:
           source.get('utm_campaign') === 'ipo_opening' ? 'ipo_opening' : 'ipo_prelisting',
-        utm_content: pathname.split('/').pop()!,
+        utm_content: pathname === '/' ? 'homepage' : pathname.split('/').pop()!,
       }).toString();
     }
+    // Use the page's public title, omitting any user-entered query or fragment.
+    const title = document.title.split('?')[0].split('#')[0] || 'MeraIPO';
     w.gtag?.('config', measurementId, {
       send_page_view: false,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
       page_location: location.toString(),
       page_referrer: '',
-      page_title: 'MeraIPO research',
+      page_title: title,
     });
     w.gtag?.('event', 'page_view', {
       page_location: location.toString(),
       page_referrer: '',
-      page_title: 'MeraIPO research',
+      page_title: title,
     });
   }, [pathname, consent, ready, excluded, configured, measurementId]);
   function choose(value: string) {

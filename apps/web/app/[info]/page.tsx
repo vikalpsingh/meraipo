@@ -108,7 +108,7 @@ const pages: Record<string, { title: string; intro: string; sections: [string, s
       ],
       [
         'Deployment configuration',
-        'The operator must publish its contact details, retention periods and hosting/subprocessor information before a public production launch. When configured, Google Analytics runs only after optional analytics consent. You can change that choice in the footer. Admin and email-preference pages are excluded.',
+        'The operator must publish its contact details, retention periods and hosting/subprocessor information before a public production launch. When configured, Google Analytics runs only after optional analytics consent. You can change that choice in the footer. Admin pages and private email confirmation and unsubscribe links are excluded. The public IPO Alerts page counts visits when analytics consent is enabled.',
       ],
     ],
   },
