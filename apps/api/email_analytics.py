@@ -132,11 +132,17 @@ async def analytics(
     )
     ga = await reports(start, end)
     traffic = {r["dimensions"][0]: r for r in ga.get("campaigns", [])}
+    campaign_members = (
+        select(m.EmailCampaign.id.label("campaign_id"), m.EmailCampaign.ipo_id)
+        .where(m.EmailCampaign.digest_key.is_(None))
+        .union_all(select(m.EmailDigestMember.campaign_id, m.EmailDigestMember.ipo_id))
+        .subquery()
+    )
     grouped = (
-        select(m.EmailCampaign.ipo_id, *counts, func.min(d.accepted_at).label("send_date"))
-        .join(m.EmailCampaign, m.EmailCampaign.id == d.campaign_id)
+        select(campaign_members.c.ipo_id, *counts, func.min(d.accepted_at).label("send_date"))
+        .join(campaign_members, campaign_members.c.campaign_id == d.campaign_id)
         .where(*cohort)
-        .group_by(m.EmailCampaign.ipo_id)
+        .group_by(campaign_members.c.ipo_id)
         .subquery()
     )
     # Only aggregates enter memory; subscriber identities never leave SQL.

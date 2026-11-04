@@ -1,6 +1,7 @@
 """Separate email outbox and pre-listing scheduler; never joins the market writer queue."""
 
 import asyncio
+import base64
 import html
 import random
 import re
@@ -29,6 +30,7 @@ from packages.shared.email_alerts import (
     token_expired,
     within_window,
 )
+from packages.shared.email_digest import UNSUBSCRIBE, digest_is_current, prepare_digests
 from packages.shared.email_policy import production_checks
 from packages.shared.email_preferences import current_band, matching_preferences
 from packages.shared.email_template import content, eligible_listing, eligible_opening
@@ -55,8 +57,11 @@ async def prepare(db):
             )
         )
     ).all()
+    await prepare_digests(db, listings, today)
     for ipo, dates, guide in listings:
-        opening = eligible_opening(ipo, dates, guide, today.date())
+        if eligible_opening(ipo, dates, guide, today.date()):
+            continue
+        opening = False
         if not opening and not (
             within_window() and eligible_listing(ipo, dates, guide, today.date())
         ):
@@ -174,7 +179,14 @@ def opening_gmp(gmp):
 
 
 def ses_send(
-    destination, subject, text, unsubscribe, delivery_id, markup_override=None, chart_png=None
+    destination,
+    subject,
+    text,
+    unsubscribe,
+    delivery_id,
+    markup_override=None,
+    chart_png=None,
+    digest_attachments=None,
 ):
     config = settings()
     origin = config.public_origin.rstrip("/")
@@ -205,6 +217,18 @@ def ses_send(
                 "ContentId": "ipo-price-chart",
                 "ContentTransferEncoding": "BASE64",
             }
+        ]
+    if digest_attachments:
+        simple["Attachments"] = [
+            {
+                "RawContent": base64.b64decode(item["png"]),
+                "FileName": item["id"] + ".png",
+                "ContentType": "image/png",
+                "ContentDisposition": "INLINE",
+                "ContentId": item["id"],
+                "ContentTransferEncoding": "BASE64",
+            }
+            for item in digest_attachments
         ]
     if unsubscribe:
         simple["Headers"] = [
@@ -267,6 +291,7 @@ async def send_one(db, key, approved=False):
     unsubscribe = None
     markup = None
     chart_png = None
+    digest_attachments = None
     if row.kind == "VERIFY":
         if token_expired(row):
             row.status = "EXPIRED"
@@ -276,71 +301,87 @@ async def send_one(db, key, approved=False):
         text = f"You requested MeraIPO email alerts or a preference update. Confirm within 24 hours:\n{origin}/email-alerts/verify#{action}\nIgnore this email if you did not request it."
     else:
         campaign = await db.get(m.EmailCampaign, row.campaign_id)
-        ipo = await db.get(m.IPO, campaign.ipo_id)
-        dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
-        guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
-        today = m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
-        if row.kind == "ALERT" and (
-            campaign.scheduled_date != today
-            or not (
-                (
-                    campaign.kind == CAMPAIGN
-                    and subscriber.gmp_band is None
-                    and within_window()
-                    and eligible_listing(ipo, dates, guide, today)
-                )
-                or (
-                    campaign.kind == "ipo_opening"
-                    and subscriber.gmp_band is not None
-                    and eligible_opening(ipo, dates, guide, today)
-                    and m.now().astimezone(ZoneInfo("Asia/Kolkata")).hour
-                    >= settings().email_send_hour_ist
-                )
+        if campaign.digest_key:
+            if not await digest_is_current(db, campaign, subscriber):
+                row.status = "CANCELLED"
+                row.error_code = "DIGEST_NO_LONGER_ELIGIBLE"
+                await db.commit()
+                return
+            payload = campaign.digest_payload
+            subject = payload["subject"]
+            private_url = origin + "/email-alerts/unsubscribe#" + action
+            text = payload["text"].replace(UNSUBSCRIBE, private_url)
+            markup = payload["html"].replace(UNSUBSCRIBE, private_url)
+            digest_attachments = payload["attachments"]
+            unsubscribe = origin + "/api/ipo-alerts/unsubscribe/" + action
+        else:
+            ipo = await db.get(m.IPO, campaign.ipo_id)
+            dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
+            guide = await db.scalar(
+                select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id)
             )
-        ):
-            row.status = "CANCELLED"
-            row.error_code = "SCHEDULE_NO_LONGER_ELIGIBLE"
-            await db.commit()
-            return
-        if (
-            row.kind == "ALERT"
-            and campaign.kind == "ipo_opening"
-            and subscriber.gmp_band not in matching_preferences(await current_band(db, ipo))
-        ):
-            # Revisit later today without consuming a send attempt or blocking other outbox rows.
-            row.status = "PENDING"
-            row.attempt_count -= 1
-            row.retry_at = m.now() + timedelta(minutes=10)
-            row.error_code = "GMP_BAND_CHANGED"
-            await db.commit()
-            return
-        company = await db.get(m.Company, ipo.company_id)
-        from packages.shared.email_alerts import tracked_url
+            today = m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+            if row.kind == "ALERT" and (
+                campaign.scheduled_date != today
+                or not (
+                    (
+                        campaign.kind == CAMPAIGN
+                        and subscriber.gmp_band is None
+                        and within_window()
+                        and eligible_listing(ipo, dates, guide, today)
+                    )
+                    or (
+                        campaign.kind == "ipo_opening"
+                        and subscriber.gmp_band is not None
+                        and eligible_opening(ipo, dates, guide, today)
+                        and m.now().astimezone(ZoneInfo("Asia/Kolkata")).hour
+                        >= settings().email_send_hour_ist
+                    )
+                )
+            ):
+                row.status = "CANCELLED"
+                row.error_code = "SCHEDULE_NO_LONGER_ELIGIBLE"
+                await db.commit()
+                return
+            if (
+                row.kind == "ALERT"
+                and campaign.kind == "ipo_opening"
+                and subscriber.gmp_band not in matching_preferences(await current_band(db, ipo))
+            ):
+                # Revisit later today without consuming a send attempt or blocking other outbox rows.
+                row.status = "PENDING"
+                row.attempt_count -= 1
+                row.retry_at = m.now() + timedelta(minutes=10)
+                row.error_code = "GMP_BAND_CHANGED"
+                await db.commit()
+                return
+            company = await db.get(m.Company, ipo.company_id)
+            from packages.shared.email_alerts import tracked_url
 
-        category = (
-            campaign.kind.split(":")[1]
-            if row.kind == "TEST" and campaign.kind.startswith("category:")
-            else None
-        )
-        opening = campaign.kind == "ipo_opening" or category is not None
-        public_url = tracked_url(
-            origin + "/ipo/" + company.slug,
-            company.slug,
-            campaign="ipo_opening" if opening else CAMPAIGN,
-        )
-        unsubscribe = origin + "/api/ipo-alerts/unsubscribe/" + action
-        template = await content(
-            db,
-            ipo.id,
-            public_url,
-            origin + "/email-alerts/unsubscribe#" + action,
-            test=row.kind == "TEST",
-            opening=opening,
-            test_category=category,
-            inline_attachment=True,
-        )
-        chart_png = template.get("chart_png")
-        subject, text, markup = template["subject"], template["text"], template["html"]
+            category = (
+                campaign.kind.split(":")[1]
+                if row.kind == "TEST" and campaign.kind.startswith("category:")
+                else None
+            )
+            opening = campaign.kind == "ipo_opening" or category is not None
+            public_url = tracked_url(
+                origin + "/ipo/" + company.slug,
+                company.slug,
+                campaign="ipo_opening" if opening else CAMPAIGN,
+            )
+            unsubscribe = origin + "/api/ipo-alerts/unsubscribe/" + action
+            template = await content(
+                db,
+                ipo.id,
+                public_url,
+                origin + "/email-alerts/unsubscribe#" + action,
+                test=row.kind == "TEST",
+                opening=opening,
+                test_category=category,
+                inline_attachment=True,
+            )
+            chart_png = template.get("chart_png")
+            subject, text, markup = template["subject"], template["text"], template["html"]
     try:
         message_id = await asyncio.to_thread(
             ses_send,
@@ -351,6 +392,7 @@ async def send_one(db, key, approved=False):
             row.id,
             markup,
             chart_png,
+            digest_attachments,
         )
         await db.execute(
             update(m.EmailDelivery)

@@ -86,3 +86,19 @@ form to request a confirmed change. A pending confirmation stores the latest sub
 
 Deploy migration, API, web and worker together. Do not enable public signup until SES readiness,
 admin test delivery and production controls have been reviewed as documented in `ses-production.md`.
+
+
+## Opening-day daily digest (20261104_email_digests)
+
+From 08:00 IST, the first eligible batch freezes the opening-day IPO and GMP snapshot.
+Each IPO card is rendered once, then combined into one persisted digest for each of the
+four cumulative preferences. Empty categories produce no mail. Each verified subscriber
+receives at most one digest that day, through an individually addressed SES request with
+a private unsubscribe token. No CC or BCC list is used.
+Repeated ticks reuse persisted content. The unique subscriber/date constraint prevents
+a second digest even after a same-day preference change. Later GMP movements do not
+change the dated morning snapshot or trigger another email. Pending per-IPO opening
+alerts are retired on upgrade. Earlier sends on the same date prevent duplicate contact.
+Canceled/postponed IPOs or changed recipient preferences cancel a pending digest conservatively.
+Legacy pre-listing subscriptions retain their existing schedule.
+Apply the migration before restarting API and workers on this version.

@@ -38,7 +38,8 @@ it('requires explicit consent, names and a single GMP band with optional phone',
   fireEvent.click(screen.getByLabelText('Gold: above 100%'));
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Subscribe to IPO alerts' }));
-  await screen.findByText('Check your inbox.');
+  await screen.findByText('Thank you! Request saved.');
+  expect(screen.getByRole('status')).toHaveTextContent('after you confirm your email');
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
     email: 'person@example.com',
     first_name: 'Test',

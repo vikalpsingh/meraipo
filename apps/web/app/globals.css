@@ -2645,3 +2645,10 @@ body:has(.company-preview[open]) {
 .category-mailer-footer span { overflow-wrap:anywhere; color:#405a50; }
 .category-mailer p[role=status]:empty { display:none; }
 @media(max-width:640px) { .category-mailer-fields,.category-mailer-options { grid-template-columns:1fr; } .category-mailer-footer button { width:100%; } }
+
+/* Public subscription feedback; operational readiness stays in MeraAdmin. */
+.email-signup .signup-success { margin-top: 24px; padding: 24px; border: 1px solid #8ac9ad; border-radius: 14px; background: #edf9f2; color: #174f3c; }
+.email-signup .signup-success h2 { margin: 0 0 12px; font-size: 22px; }
+.email-signup .signup-success p { line-height: 1.65; }
+.email-signup .signup-success a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; text-decoration: underline; }
+.email-signup .signup-error { margin-top: 16px; color: #922c28; }

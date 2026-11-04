@@ -665,6 +665,8 @@ class EmailSubscriber(Entity, Base):
 
 
 class EmailCampaign(Entity, Base):
+    digest_key: Mapped[str | None] = mapped_column(String(40), unique=True)
+    digest_payload: Mapped[dict | None] = mapped_column(JSON)
     __tablename__ = "email_campaigns"
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), index=True)
@@ -673,7 +675,14 @@ class EmailCampaign(Entity, Base):
     __table_args__ = (UniqueConstraint("ipo_id", "kind", "scheduled_date"),)
 
 
+class EmailDigestMember(Base):
+    __tablename__ = "email_digest_members"
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("email_campaigns.id"), primary_key=True)
+    ipo_id: Mapped[str] = mapped_column(ForeignKey("ipos.id"), primary_key=True)
+
+
 class EmailDelivery(Entity, Base):
+    digest_date: Mapped[date | None] = mapped_column(Date)
     __tablename__ = "email_deliveries"
     requested_profile_encrypted: Mapped[str | None] = mapped_column(Text)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -693,7 +702,10 @@ class EmailDelivery(Entity, Base):
     clicked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unsubscribed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_code: Mapped[str | None] = mapped_column(String(60))
-    __table_args__ = (UniqueConstraint("subscriber_id", "campaign_id"),)
+    __table_args__ = (
+        UniqueConstraint("subscriber_id", "campaign_id"),
+        UniqueConstraint("subscriber_id", "digest_date"),
+    )
 
 
 class EmailClickEvent(Entity, Base):

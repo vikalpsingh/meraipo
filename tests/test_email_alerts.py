@@ -459,7 +459,7 @@ def test_profile_requires_one_band_and_names_but_not_phone():
             validate_profile({**body, field: value})
 
 
-async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
+async def test_opening_digest_shared_snapshot_and_duplicate_prevention(db, monkeypatch):
     from decimal import Decimal
     from zoneinfo import ZoneInfo
 
@@ -473,6 +473,7 @@ async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
     ipo.raw_status = "OPEN"
     ipo.price_high = Decimal("100")
     sub.gmp_band = "gold"
+    campaign.scheduled_date = m.now().date() - timedelta(days=1)
     dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
     today = m.now().astimezone(ZoneInfo("Asia/Kolkata")).date()
     dates.open_date = today
@@ -495,13 +496,57 @@ async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
     state = await control(db)
     state.sending_enabled = True
     await db.commit()
+    other = m.EmailSubscriber(
+        email_hash=token("other@example.com", "email"),
+        email_encrypted=encrypt_secret("other@example.com"),
+        consent_at=m.now(),
+        verified_at=m.now(),
+        gmp_band="gold",
+    )
+    db.add(other)
+    second = await db.scalar(select(m.IPO).where(m.IPO.id != ipo.id).limit(1))
+    second_company = await db.get(m.Company, second.company_id)
+    second_company.is_demo = False
+    second.status = "OPEN"
+    second.raw_status = "OPEN"
+    second.price_high = Decimal("100")
+    second_dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == second.id))
+    second_dates.open_date = today
+    second_dates.listing_date = today + timedelta(days=7)
+    second_guide = await db.scalar(
+        select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == second.id)
+    )
+    if not second_guide:
+        second_guide = m.ApplicantGuide(ipo_id=second.id)
+        db.add(second_guide)
+    second_guide.schedule_status = "CONFIRMED"
+    second_guide.verification_status = "VERIFIED"
+    db.add(
+        m.GMP(
+            ipo_id=second.id,
+            value=Decimal("120"),
+            observed_at=m.now(),
+            source_url="https://example.com/gmp",
+            import_key="digest-second",
+        )
+    )
+    await db.commit()
+    from unittest.mock import AsyncMock
+
+    from packages.shared import email_digest
+
+    render = AsyncMock(wraps=email_digest.content)
+    monkeypatch.setattr(email_digest, "content", render)
     await prepare(db)
+    first_calls = render.call_count
     await prepare(db)
-    opening = await db.scalar(select(m.EmailCampaign).where(m.EmailCampaign.kind == "ipo_opening"))
+    assert first_calls == 2 and render.call_count == 2
+    opening = await db.scalar(select(m.EmailCampaign).where(m.EmailCampaign.kind == "digest_gold"))
     rows = (
         await db.scalars(select(m.EmailDelivery).where(m.EmailDelivery.campaign_id == opening.id))
     ).all()
-    assert len(rows) == 1
+    assert len(rows) == 2
+    assert set(opening.digest_payload["ipo_ids"]) == {ipo.id, second.id}
     row = rows[0]
     sent = []
     monkeypatch.setattr(
@@ -511,20 +556,34 @@ async def test_opening_gold_recheck_and_duplicate_prevention(db, monkeypatch):
     await db.commit()
     await send_one(db, row.id, approved=True)
     await db.refresh(row)
-    assert not sent and row.status == "PENDING" and row.attempt_count == 0
-    quote.value = Decimal("101")
-    row.retry_at = None
-    await db.commit()
-    await send_one(db, row.id, approved=True)
-    assert len(sent) == 1 and "Opens Today" in sent[0][1]
-    assert 'src="cid:ipo-price-chart"' in sent[0][5]
-    assert sent[0][6].startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(sent) == 1 and "opening today" in sent[0][1]
+    assert "+101.00%" in sent[0][2]  # Immutable morning snapshot despite later quote changes.
+    assert 'src="cid:ipo-' in sent[0][5]
+    assert sent[0][7] and sent[0][7][0]["png"]
     assert "GMP observed" in sent[0][5]
+    await send_one(db, row.id, approved=True)
     await send_one(db, row.id, approved=True)
     assert len(sent) == 1
     # Explicit preferences must never receive the legacy listing-day campaign.
     await send_one(db, old.id, approved=True)
     assert len(sent) == 1
+
+    await send_one(db, rows[1].id, approved=True)
+    assert len(sent) == 2 and sent[0][0] != sent[1][0]
+    assert sent[0][7] == sent[1][7]
+    assert sent[0][5] != sent[1][5]  # Individual unsubscribe tokens.
+    assert render.call_count == 2
+    sub.gmp_band = "white"
+    await db.commit()
+    await prepare(db)
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(m.EmailDelivery)
+            .where(m.EmailDelivery.digest_date == today)
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize(

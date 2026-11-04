@@ -47,8 +47,19 @@ export function EmailSubscription({
         },
       );
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || 'Please try again later.');
-      setMessage(data.message);
+      if (!response.ok) {
+        const reason = response.status === 429
+          ? 'Please wait a little before trying again.'
+          : response.status === 422
+            ? 'Please check your details, choose a GMP preference and give consent.'
+            : action !== 'subscribe' && response.status === 400
+              ? 'This link is invalid or has expired. Please request a new confirmation email.'
+              : 'We could not complete your request right now. Please try again later.';
+        throw new Error(reason);
+      }
+      setMessage(action === 'subscribe'
+        ? 'Your subscription request has been saved. Check your inbox and spam folder for a confirmation email. Your preferences take effect after you confirm your email.'
+        : data.message);
       setDone(true);
       if (action === 'subscribe') onSubscribed?.();
     } catch (error) {
@@ -68,7 +79,7 @@ export function EmailSubscription({
       </h1>
       <p>
         {action === 'subscribe'
-          ? 'Opening-day alerts, matched to your interests. Choose all IPOs or a minimum GMP threshold. One alert per IPO. GMP is unofficial and does not guarantee a listing gain.'
+          ? 'Opening-day alerts, matched to your interests. Choose all IPOs or a minimum GMP threshold. One daily email combines matching IPOs opening that day. GMP is unofficial and does not guarantee a listing gain.'
           : 'Use the button below to complete your request.'}
       </p>
       {!done && (
@@ -162,7 +173,15 @@ export function EmailSubscription({
           </button>
         </form>
       )}
-      <p role="status">{message}</p>
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {message && (
+          <div className={done ? 'signup-success' : 'signup-error'}>
+            {done && <h2>{action === 'subscribe' ? 'Thank you! Request saved.' : 'Request completed'}</h2>}
+            <p>{message}</p>
+            {done && <Link href="/">Explore current IPOs →</Link>}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
