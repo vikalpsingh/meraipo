@@ -456,6 +456,9 @@ class SchedulerControl(Base):
     schedule_times: Mapped[list | None] = mapped_column(JSON)
     frequency: Mapped[str] = mapped_column(String(10), default="daily", server_default="daily")
     weekday: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    interval_hours: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    saturday_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    sunday_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
 class MarketConfiguration(Base):

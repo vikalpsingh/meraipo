@@ -23,6 +23,9 @@ export type ScheduledJob = {
   times?: string[];
   frequency?: 'hourly' | 'daily' | 'weekly';
   weekday?: number;
+  interval_hours?: number;
+  saturday_enabled?: boolean;
+  sunday_enabled?: boolean;
   next_run: string | null;
   last: JobRun | null;
   last_success: JobRun | null;

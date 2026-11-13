@@ -8,7 +8,7 @@ from packages.providers.bhavcopy import sources
 
 EXCHANGE_JOBS = {
     f"sync-{kind}-{exchange.lower()}": (
-        f"{exchange} · {'Daily closing prices' if kind=='prices' else 'Quarterly results'}",
+        f"{exchange} · {'Daily closing prices' if kind == 'prices' else 'Quarterly results'}",
         kind,
         exchange,
     )
@@ -42,31 +42,55 @@ async def schedule_state(db, job, config):
         "source_enabled": enabled,
         "frequency": control.frequency if control else "daily",
         "weekday": control.weekday if control else 0,
+        "interval_hours": control.interval_hours if control else 1,
+        "saturday_enabled": control.saturday_enabled if control else True,
+        "sunday_enabled": control.sunday_enabled if control else True,
     }
 
 
 def is_due(state, at):
     local = at.astimezone(ZoneInfo("Asia/Kolkata"))
+    if local.weekday() == 5 and not state.get("saturday_enabled", True):
+        return False
+    if local.weekday() == 6 and not state.get("sunday_enabled", True):
+        return False
     if state["frequency"] == "hourly":
-        return local.minute == int(state["times"][0].split(":")[1])
+        hour, minute = map(int, state["times"][0].split(":"))
+        return local.minute == minute and (local.hour - hour) % state.get("interval_hours", 1) == 0
     if state["frequency"] == "weekly" and local.weekday() != state["weekday"]:
         return False
     return local.strftime("%H:%M") in state["times"]
 
 
-def next_slot(times, at, frequency="daily", weekday=0):
+def next_slot(
+    times,
+    at,
+    frequency="daily",
+    weekday=0,
+    interval_hours=1,
+    saturday_enabled=True,
+    sunday_enabled=True,
+):
     local = at.astimezone(ZoneInfo("Asia/Kolkata"))
-    if frequency == "hourly":
-        candidate = local.replace(minute=int(times[0].split(":")[1]), second=0, microsecond=0)
-        return (candidate if candidate > local else candidate + timedelta(hours=1)).isoformat()
+    state = dict(
+        times=times,
+        frequency=frequency,
+        weekday=weekday,
+        interval_hours=interval_hours,
+        saturday_enabled=saturday_enabled,
+        sunday_enabled=sunday_enabled,
+    )
     for offset in range(8):
         day = local + timedelta(days=offset)
-        if frequency == "weekly" and day.weekday() != weekday:
-            continue
-        for slot in sorted(times):
+        slots = (
+            [f"{hour:02d}:{times[0].split(':')[1]}" for hour in range(24)]
+            if frequency == "hourly"
+            else sorted(times)
+        )
+        for slot in slots:
             hour, minute = map(int, slot.split(":"))
             candidate = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if candidate > local:
+            if candidate > local and is_due(state, candidate):
                 return candidate.isoformat()
 
 

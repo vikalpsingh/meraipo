@@ -5,6 +5,7 @@ import { human, timestamp } from '@/lib/format';
 import { GuideEditor } from '@/components/guide-editor';
 import { MarketConsole } from '@/components/market-console';
 import { MarketConfig } from '@/components/market-config';
+import { EmailSubscribers } from '@/components/email-subscribers';
 import { JobErrorLog } from '@/components/job-error-log';
 import { FeedbackInbox } from '@/components/feedback-inbox';
 import { EmailControlCenter } from '@/components/email-control-center';
@@ -260,6 +261,8 @@ export default function Console() {
           'Config',
           'Analytics',
           'Email Control Center',
+          'Email subscribers',
+          'Job error log',
           'Email Alerts Analytics',
           'Customer feedback',
           'IPOs',
@@ -753,7 +756,8 @@ export default function Console() {
           ))}
         </section>
       )}
-      {tab !== 'Data & scheduler' && <JobErrorLog />}
+      {tab === 'Job error log' && <JobErrorLog />}
+      {tab === 'Email subscribers' && <EmailSubscribers />}
     </>
   );
 }

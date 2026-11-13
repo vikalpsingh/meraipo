@@ -47,9 +47,16 @@ function JobCard({
     const values = new FormData(event.currentTarget);
     void action(job.name, 'schedule', {
       frequency,
+      ...(job.name === 'sync-ipos'
+        ? {
+            interval_hours: Number(values.get('interval_hours') || 1),
+            saturday_enabled: values.get('saturday_enabled') === 'on',
+            sunday_enabled: values.get('sunday_enabled') === 'on',
+          }
+        : {}),
       weekday: Number(values.get('weekday') || 0),
       times:
-        frequency === 'hourly'
+        frequency === 'hourly' && job.name !== 'sync-ipos'
           ? [`00:${String(values.get('minute')).padStart(2, '0')}`]
           : String(values.get('times'))
               .split(',')
@@ -84,10 +91,11 @@ function JobCard({
       </div>
       <p className="small">
         {job.frequency === 'hourly'
-          ? `Hourly · minute ${job.times?.[0]?.slice(3)}`
+          ? `Every ${job.interval_hours || 1} hour(s) · anchor ${job.times?.[0]}`
           : `${job.frequency === 'weekly' ? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][job.weekday || 0] : 'Daily'} · ${job.times?.join(', ') || job.schedule}`}{' '}
         IST
       </p>
+      {job.name === 'sync-ipos' && <p className="small">Saturday: {job.saturday_enabled === false ? 'Off' : 'On'} · Sunday: {job.sunday_enabled === false ? 'Off' : 'On'}</p>}
       <dl className="job-facts">
         <div>
           <dt>Next run (IST)</dt>
@@ -159,7 +167,39 @@ function JobCard({
                 <option value="weekly">Weekly</option>
               </select>
             </label>
-            {frequency === 'hourly' ? (
+            {job.name === 'sync-ipos' && (
+              <>
+                {frequency === 'hourly' && (
+                  <label>
+                    Run interval
+                    <select name="interval_hours" defaultValue={job.interval_hours || 1}>
+                      {[1, 2, 4, 6, 12, 24].map((hours) => (
+                        <option key={hours} value={hours}>
+                          Every {hours} hour{hours === 1 ? '' : 's'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label>
+                  <input
+                    type="checkbox"
+                    name="saturday_enabled"
+                    defaultChecked={job.saturday_enabled ?? true}
+                  />{' '}
+                  Run on Saturday
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="sunday_enabled"
+                    defaultChecked={job.sunday_enabled ?? true}
+                  />{' '}
+                  Run on Sunday
+                </label>
+              </>
+            )}
+            {frequency === 'hourly' && job.name !== 'sync-ipos' ? (
               <label key="hourly-minute">
                 Minute past each hour (IST)
                 <input
@@ -204,7 +244,9 @@ function JobCard({
             )}
             <p className="small">
               {frequency === 'hourly'
-                ? 'Runs every hour at the selected minute.'
+                ? job.name === 'sync-ipos'
+                  ? 'Runs at the chosen interval, anchored to the IST time above. Disabled weekend days are skipped; manual runs remain available.'
+                  : 'Runs every hour at the selected minute.'
                 : frequency === 'weekly'
                   ? 'One 24-hour HH:MM time on the selected weekday.'
                   : '24-hour HH:MM time; price jobs also accept comma-separated retry times.'}{' '}
@@ -407,7 +449,7 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
           <div className="job-grid">
             {primary.map((job) => (
               <JobCard
-                key={`${job.name}:${job.frequency}:${job.weekday}:${job.times?.join(',')}`}
+                key={`${job.name}:${job.frequency}:${job.weekday}:${job.interval_hours}:${job.saturday_enabled}:${job.sunday_enabled}:${job.times?.join(',')}`}
                 job={job}
                 busy={busy}
                 action={action}

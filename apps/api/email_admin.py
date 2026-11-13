@@ -1,10 +1,11 @@
 """Authenticated email operations; test mail targets only the signed-in administrator."""
 
+import json
 from datetime import timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, StrictBool
 from sqlalchemy import func, select
 
@@ -25,7 +26,7 @@ from packages.shared.email_alerts import (
 from packages.shared.email_policy import production_checks
 from packages.shared.email_preferences import BANDS
 from packages.shared.email_template import content
-from packages.shared.market_config import encrypt_secret
+from packages.shared.market_config import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/admin/email")
 
@@ -366,3 +367,84 @@ async def retry(delivery_id: str, auth=Depends(admin), db=Depends(get_session)):
         "message": "Eligible retry remains scheduled with backoff; the worker rechecks consent and listing dates.",
         "retry_at": row.retry_at,
     }
+
+
+@router.get("/subscribers")
+async def subscribers(
+    response: Response,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    auth=Depends(admin),
+    db=Depends(get_session),
+):
+    response.headers["Cache-Control"] = "no-store"
+    s = m.EmailSubscriber
+    registered = (
+        s.contact_encrypted.is_not(None)
+        | select(m.EmailDelivery.id)
+        .where(m.EmailDelivery.subscriber_id == s.id, m.EmailDelivery.kind == "VERIFY")
+        .exists()
+    )
+    counts = {}
+    for label, condition in {
+        "total": registered,
+        "active": registered
+        & s.verified_at.is_not(None)
+        & s.unsubscribed_at.is_(None)
+        & s.suppressed_at.is_(None),
+        "pending": registered
+        & s.verified_at.is_(None)
+        & s.unsubscribed_at.is_(None)
+        & s.suppressed_at.is_(None),
+        "unsubscribed": registered & s.unsubscribed_at.is_not(None) & s.suppressed_at.is_(None),
+        "suppressed": registered & s.suppressed_at.is_not(None),
+    }.items():
+        counts[label] = await db.scalar(select(func.count()).select_from(s).where(condition))
+    pages = max(1, (counts["total"] + page_size - 1) // page_size)
+    page = min(page, pages)
+    rows = (
+        await db.scalars(
+            select(s)
+            .where(registered)
+            .order_by(s.created_at.desc(), s.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    pending = {}
+    if rows:
+        deliveries = (
+            await db.scalars(
+                select(m.EmailDelivery)
+                .where(
+                    m.EmailDelivery.subscriber_id.in_([r.id for r in rows]),
+                    m.EmailDelivery.kind == "VERIFY",
+                    m.EmailDelivery.requested_profile_encrypted.is_not(None),
+                )
+                .order_by(m.EmailDelivery.created_at.desc(), m.EmailDelivery.id)
+            )
+        ).all()
+        for delivery in deliveries:
+            pending.setdefault(delivery.subscriber_id, delivery.requested_profile_encrypted)
+    items = []
+    for row in rows:
+        encrypted = row.contact_encrypted or pending.get(row.id)
+        profile = json.loads(decrypt_secret(encrypted)) if encrypted else {}
+        items.append(
+            dict(
+                id=row.id,
+                first_name=profile.get("first_name"),
+                last_name=profile.get("last_name"),
+                email=decrypt_secret(row.email_encrypted),
+                gmp_band=row.gmp_band or profile.get("gmp_band"),
+                status="Suppressed"
+                if row.suppressed_at
+                else "Unsubscribed"
+                if row.unsubscribed_at
+                else "Active"
+                if row.verified_at
+                else "Pending confirmation",
+                created_at=row.created_at,
+            )
+        )
+    return dict(items=items, counts=counts, page=page, pages=pages, page_size=page_size)

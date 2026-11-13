@@ -91,7 +91,7 @@ async def prepare_digests(db, listings, today):
             payload = {
                 "category": category,
                 "ipo_ids": [item[0] for item in matches],
-                "subject": title,
+                "subject": "MeraIPO | Today’s IPO alerts",
                 "text": title
                 + "\nSnapshot: "
                 + stamp

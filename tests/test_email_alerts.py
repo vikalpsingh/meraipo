@@ -547,6 +547,7 @@ async def test_opening_digest_shared_snapshot_and_duplicate_prevention(db, monke
     ).all()
     assert len(rows) == 2
     assert set(opening.digest_payload["ipo_ids"]) == {ipo.id, second.id}
+    assert opening.digest_payload["subject"] == "MeraIPO | Today’s IPO alerts"
     row = rows[0]
     sent = []
     monkeypatch.setattr(

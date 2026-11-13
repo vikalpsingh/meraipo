@@ -26,6 +26,9 @@ class ScheduleInput(Input):
     paused: bool
     frequency: Literal["hourly", "daily", "weekly"] = "daily"
     weekday: int = Field(0, ge=0, le=6)
+    interval_hours: Literal[1, 2, 4, 6, 12, 24] = 1
+    saturday_enabled: bool = True
+    sunday_enabled: bool = True
 
 
 def run_record(run):
@@ -80,7 +83,15 @@ async def enrich_jobs(db, jobs, config):
             job.update(state)
             job["schedule"] = ", ".join(state["times"]) + " " + state["frequency"]
             job["next_run"] = (
-                next_slot(state["times"], m.now(), state["frequency"], state["weekday"])
+                next_slot(
+                    state["times"],
+                    m.now(),
+                    state["frequency"],
+                    state["weekday"],
+                    state["interval_hours"],
+                    state["saturday_enabled"],
+                    state["sunday_enabled"],
+                )
                 if config.market_scheduler_enabled
                 and config.market_scheduler_driver == "celery"
                 and not state["paused"]
@@ -116,6 +127,15 @@ async def save_schedule(
         "frequency": control.frequency,
         "weekday": control.weekday,
     }
+    before.update(
+        {
+            key: getattr(control, key)
+            for key in ("interval_hours", "saturday_enabled", "sunday_enabled")
+        }
+    )
+    control.interval_hours = data.interval_hours
+    control.saturday_enabled = data.saturday_enabled
+    control.sunday_enabled = data.sunday_enabled
     control.paused = data.paused
     control.frequency, control.weekday = data.frequency, data.weekday
     control.schedule_times = sorted(data.times)
