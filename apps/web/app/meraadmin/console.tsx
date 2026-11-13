@@ -757,7 +757,7 @@ export default function Console() {
         </section>
       )}
       {tab === 'Job error log' && <JobErrorLog />}
-      {tab === 'Email subscribers' && <EmailSubscribers />}
+      {tab === 'Email subscribers' && <EmailSubscribers csrf={session.csrf_token} />}
     </>
   );
 }

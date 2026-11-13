@@ -21,7 +21,50 @@ const bands: Record<string, string> = {
   strong_green: 'Above 40%',
   gold: 'Above 100%',
 };
-export function EmailSubscribers() {
+const statuses: Record<string, { meaning: string; action: string }> = {
+  Active: {
+    meaning:
+      'Email confirmed; eligible for alerts matching the saved preference when production sending is enabled.',
+    action: 'No confirmation action needed.',
+  },
+  'Pending confirmation': {
+    meaning:
+      'Signup saved, but the email address has not been confirmed. Scheduled alerts are not sent.',
+    action:
+      'Ask the user to check their inbox and spam folder and click the confirmation link. Saving a signup does not prove the confirmation email was delivered.',
+  },
+  Unsubscribed: {
+    meaning: 'The user opted out. Scheduled alerts are not sent.',
+    action: 'The user must subscribe again and confirm their email to resume alerts.',
+  },
+  Suppressed: {
+    meaning: 'Sending is blocked by the email suppression system.',
+    action: 'Review delivery, bounce and complaint records before taking action.',
+  },
+};
+export function EmailSubscribers({ csrf }: { csrf: string }) {
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderMessage, setReminderMessage] = useState('');
+  const [reviewed, setReviewed] = useState(false);
+  async function remind() {
+    setReminderBusy(true);
+    setReminderMessage('');
+    try {
+      const response = await fetch('/api/v1/admin/email/subscribers/remind', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrf },
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error?.message || result.detail || 'Could not queue reminders.');
+      setReminderMessage(result.message);
+      setReviewed(false);
+    } catch (e) {
+      setReminderMessage(e instanceof Error ? e.message : 'Could not queue reminders.');
+    } finally {
+      setReminderBusy(false);
+    }
+  }
   const [data, setData] = useState<Data | null>(null);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
@@ -64,18 +107,92 @@ export function EmailSubscribers() {
         Registered IPO alert users, newest first. Test-only recipients are excluded. Pending users
         must confirm their email before receiving alerts.
       </p>
+      <details className="admin-status-guide">
+        <summary>What do subscriber statuses mean?</summary>
+        <div
+          className="admin-table-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label="Subscriber status meanings"
+        >
+          <table>
+            <caption>Status meanings and next steps</caption>
+            <thead>
+              <tr>
+                <th scope="col">Status</th>
+                <th scope="col">Meaning</th>
+                <th scope="col">Next step</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(statuses).map(([status, info]) => (
+                <tr key={status}>
+                  <th scope="row">{status}</th>
+                  <td>{info.meaning}</td>
+                  <td>{info.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <div className="panel">
+        <h3>Confirmation reminders</h3>
+        <p>
+          Every Monday at 9:00 AM IST, pending users receive a fresh confirmation link, for up to
+          three weekly reminders after registration. This button queues all eligible pending users
+          across all pages, with the same weekly limit. It never marks an address confirmed.
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={reviewed}
+            onChange={(e) => setReviewed(e.target.checked)}
+          />{' '}
+          I have reviewed the pending registrations and want to send eligible confirmation
+          reminders.
+        </label>
+        <button className="outline-button" disabled={!reviewed || reminderBusy} onClick={remind}>
+          {reminderBusy ? 'Queuing…' : 'Send bulk confirmation reminders'}
+        </button>
+        <p role="status">{reminderMessage}</p>
+      </div>
       {busy && <p role="status">Loading subscribers…</p>}
       {error && <p role="alert">{error}</p>}
       {data && (
         <>
-          <dl className="job-facts">
-            {Object.entries(data.counts).map(([label, count]) => (
-              <div key={label}>
-                <dt>{label === 'total' ? 'Total registered' : label}</dt>
-                <dd>{count}</dd>
-              </div>
-            ))}
-          </dl>
+          <div
+            className="admin-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Subscriber counts"
+          >
+            <table>
+              <caption>Registration summary</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Registration status</th>
+                  <th scope="col">Users</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.counts).map(([label, count]) => (
+                  <tr key={label}>
+                    <th scope="row">
+                      {{
+                        total: 'Total registered',
+                        active: 'Active',
+                        pending: 'Pending confirmation',
+                        unsubscribed: 'Unsubscribed',
+                        suppressed: 'Suppressed',
+                      }[label] || label}
+                    </th>
+                    <td>{count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <label>
             Rows per page{' '}
             <select
@@ -92,7 +209,12 @@ export function EmailSubscribers() {
               ))}
             </select>
           </label>
-          <div style={{ overflowX: 'auto' }}>
+          <div
+            className="admin-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Subscriber directory"
+          >
             <table>
               <caption>Subscriber names, email addresses and alert preferences</caption>
               <thead>
@@ -112,7 +234,10 @@ export function EmailSubscribers() {
                     <td>{row.last_name || '—'}</td>
                     <td>{row.email}</td>
                     <td>{bands[row.gmp_band || ''] || 'Not selected'}</td>
-                    <td>{row.status}</td>
+                    <td>
+                      <strong>{row.status}</strong>
+                      <small className="admin-cell-help">{statuses[row.status]?.meaning}</small>
+                    </td>
                     <td>{timestamp(row.created_at)}</td>
                   </tr>
                 ))}

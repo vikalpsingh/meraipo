@@ -112,7 +112,7 @@ async def status(
     failures = (
         await db.scalars(
             select(m.EmailDelivery)
-            .where(m.EmailDelivery.error_code.is_not(None))
+            .where(m.EmailDelivery.error_code.is_not(None), m.EmailDelivery.updated_at >= cutoff)
             .order_by(m.EmailDelivery.updated_at.desc())
             .limit(25)
         )
@@ -127,6 +127,7 @@ async def status(
     await db.commit()
     return {
         "sending_enabled": state.sending_enabled,
+        "send_hour_ist": settings().email_send_hour_ist,
         "readiness": checks,
         "counts": counts,
         "subscribers": subscriber_counts,
@@ -156,6 +157,8 @@ async def status(
                 "kind": r.kind,
                 "status": r.status,
                 "attempts": r.attempt_count,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
                 "code": r.error_code,
                 "retry_at": r.retry_at,
                 "eligible_retry": r.status in ("RETRY", "FAILED")
@@ -448,3 +451,14 @@ async def subscribers(
             )
         )
     return dict(items=items, counts=counts, page=page, pages=pages, page_size=page_size)
+
+
+@router.post("/subscribers/remind")
+async def remind_subscribers(auth=Depends(admin), db=Depends(get_session)):
+    from packages.shared.email_reminders import queue_reminders
+
+    await require_test_sender()
+    result = await queue_reminders(db)
+    audit(db, auth, "email.confirmation_reminders", {"queued": result["queued"]})
+    await db.commit()
+    return result

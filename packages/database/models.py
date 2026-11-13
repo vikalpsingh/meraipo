@@ -685,6 +685,7 @@ class EmailDigestMember(Base):
 
 
 class EmailDelivery(Entity, Base):
+    reminder_week: Mapped[date | None] = mapped_column(Date)
     digest_date: Mapped[date | None] = mapped_column(Date)
     __tablename__ = "email_deliveries"
     requested_profile_encrypted: Mapped[str | None] = mapped_column(Text)
@@ -708,6 +709,7 @@ class EmailDelivery(Entity, Base):
     __table_args__ = (
         UniqueConstraint("subscriber_id", "campaign_id"),
         UniqueConstraint("subscriber_id", "digest_date"),
+        UniqueConstraint("subscriber_id", "reminder_week"),
     )
 
 

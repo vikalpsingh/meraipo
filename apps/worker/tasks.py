@@ -34,6 +34,11 @@ celery.conf.update(
     },
 )
 
+celery.conf.beat_schedule["weekly-confirmation-reminders"] = {
+    "task": "meraipo.confirmation_reminders",
+    "schedule": crontab(hour=9, minute=0, day_of_week="monday"),
+}
+
 # Independent email outbox; disabled unless explicitly configured.
 celery.conf.beat_schedule["email-alert-outbox"] = {
     "task": "meraipo.email_tick",

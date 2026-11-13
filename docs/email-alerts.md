@@ -90,7 +90,7 @@ admin test delivery and production controls have been reviewed as documented in 
 
 ## Opening-day daily digest (20261104_email_digests)
 
-From 08:00 IST, the first eligible batch freezes the opening-day IPO and GMP snapshot.
+From 09:00 IST, the first eligible batch freezes the opening-day IPO and GMP snapshot.
 Each IPO card is rendered once, then combined into one persisted digest for each of the
 four cumulative preferences. Empty categories produce no mail. Each verified subscriber
 receives at most one digest that day, through an individually addressed SES request with
@@ -102,3 +102,15 @@ alerts are retired on upgrade. Earlier sends on the same date prevent duplicate 
 Canceled/postponed IPOs or changed recipient preferences cancel a pending digest conservatively.
 Legacy pre-listing subscriptions retain their existing schedule.
 Apply the migration before restarting API and workers on this version.
+
+## Pending confirmation reminders
+The original signup confirmation is immediate. An independent Celery schedule queues
+reminders on Monday at 09:00 Asia/Kolkata. The first opportunity is the first Monday
+09:00 after signup, followed by two more weekly opportunities. No reminders are queued
+after that three-week window. Failed, missed or expired reminders are not extended
+beyond the window. Manual bulk reminders share the same weekly reservations and cap,
+and apply across all eligible pending registrations, not only the visible page.
+Confirmed, unsubscribed, suppressed and test-only recipients are excluded. Each reminder
+copies the latest pending profile into a fresh confirmation delivery with a 24-hour token.
+Reminder emails include a stop-reminders link. Sending is performed by the existing
+rate-limited outbox. Deploy migration 20261114_confirm_reminders before API/worker/scheduler.

@@ -144,8 +144,10 @@ async def confirm(request: Request, db=Depends(get_session)):
     if row.kind != "VERIFY" or token_expired(row):
         raise HTTPException(400, "Invalid or expired link")
     subscriber = await db.get(m.EmailSubscriber, row.subscriber_id, with_for_update=True)
-    if subscriber.suppressed_at:
-        raise HTTPException(400, "This address cannot receive alerts.")
+    if subscriber.suppressed_at or (row.reminder_week and subscriber.unsubscribed_at):
+        raise HTTPException(
+            400, "This address cannot receive alerts. Submit a new subscription request to resume."
+        )
     # A consumed confirmation cannot reactivate a later unsubscribe.
     if row.status != "CONFIRMED":
         subscriber.verified_at = subscriber.verified_at or m.now()

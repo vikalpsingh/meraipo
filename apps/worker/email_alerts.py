@@ -293,12 +293,22 @@ async def send_one(db, key, approved=False):
     chart_png = None
     digest_attachments = None
     if row.kind == "VERIFY":
+        if row.reminder_week and (subscriber.verified_at or subscriber.unsubscribed_at):
+            row.status = "CANCELLED"
+            await db.commit()
+            return
         if token_expired(row):
             row.status = "EXPIRED"
             await db.commit()
             return
-        subject = "Confirm your MeraIPO email alerts"
+        subject = (
+            "Reminder: confirm your MeraIPO email alerts"
+            if row.reminder_week
+            else "Confirm your MeraIPO email alerts"
+        )
         text = f"You requested MeraIPO email alerts or a preference update. Confirm within 24 hours:\n{origin}/email-alerts/verify#{action}\nIgnore this email if you did not request it."
+        if row.reminder_week:
+            text += f"\nStop confirmation reminders: {origin}/email-alerts/unsubscribe#{action}"
     else:
         campaign = await db.get(m.EmailCampaign, row.campaign_id)
         if campaign.digest_key:
@@ -559,5 +569,16 @@ def email_tick():
             from apps.api.cache import client
 
             await client.aclose()
+
+    return asyncio.run(run())
+
+
+@celery.task(name="meraipo.confirmation_reminders")
+def confirmation_reminders():
+    async def run():
+        from packages.shared.email_reminders import queue_reminders
+
+        async with Session() as db:
+            return await queue_reminders(db)
 
     return asyncio.run(run())

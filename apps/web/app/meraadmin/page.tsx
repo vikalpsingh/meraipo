@@ -2,7 +2,7 @@ import Console from './console';
 export const metadata = { title: 'Maintenance console', robots: { index: false, follow: false } };
 export default function Admin() {
   return (
-    <main>
+    <main className="admin-surface">
       <div className="page-heading">
         <div>
           <p className="eyebrow">PRIVATE MAINTENANCE</p>

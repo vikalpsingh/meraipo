@@ -2652,3 +2652,18 @@ body:has(.company-preview[open]) {
 .email-signup .signup-success p { line-height: 1.65; }
 .email-signup .signup-success a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; text-decoration: underline; }
 .email-signup .signup-error { margin-top: 16px; color: #922c28; }
+
+/* Consistent tabular presentation across the private admin console. */
+.admin-surface table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.admin-surface table caption { text-align: left; font-weight: 600; padding: 12px 0; color: #405a50; }
+.admin-surface table th, .admin-surface table td { padding: 12px 16px; border: 1px solid #d8e2de; vertical-align: top; line-height: 1.5; }
+.admin-surface table thead th { background: #edf4f1; color: #244b3e; font-weight: 700; }
+.admin-surface table tbody th { font-weight: 600; }
+.admin-surface table tbody tr:nth-child(even) { background: #f7faf8; }
+.admin-surface table tbody tr:hover { background: #eef6f2; }
+.admin-surface table td { font-variant-numeric: tabular-nums; }
+.admin-table-scroll { overflow-x: auto; max-width: 100%; margin: 16px 0; }
+.admin-table-scroll table { min-width: 640px; }
+.admin-cell-help { display: block; max-width: 28rem; min-width: 16rem; margin-top: 6px; font-weight: 400; color: #52665e; }
+.admin-status-guide { margin: 16px 0; }
+.admin-status-guide summary { cursor: pointer; padding: 12px 0; font-weight: 600; }

@@ -16,6 +16,7 @@ type Check = {
 };
 type Status = {
   sending_enabled: boolean;
+  send_hour_ist?: number;
   readiness: Check;
   counts: Record<string, number>;
   subscribers: Record<string, number>;
@@ -35,6 +36,8 @@ type Status = {
     kind: string;
     status: string;
     attempts: number;
+    created_at: string;
+    updated_at: string;
     code: string;
     retry_at: string | null;
     eligible_retry: boolean;
@@ -215,6 +218,12 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
         {data && (
           <>
             <h3>Production dispatch</h3>
+            <p>
+              Opening-day subscriber alerts start at{' '}
+              {String(data.send_hour_ist ?? 9).padStart(2, '0')}:00 IST. One combined email per
+              eligible subscriber, matched to their confirmed GMP preference, with an unsubscribe
+              link.
+            </p>
             <p>
               {data.sending_enabled
                 ? 'Enabled · every dispatch still checks readiness'
@@ -445,20 +454,53 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
             )}
             <h3>Last dispatch</h3>
             {data.last_run ? (
-              <p>
-                {data.last_run.id} · {data.last_run.status} · {data.last_run.processed} processed ·{' '}
-                {date(data.last_run.finished_at)} ·{' '}
-                {data.last_run.error_code || 'No recorded error'}
-              </p>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Dispatch run ID</th>
+                      <th>Status</th>
+                      <th>Processed</th>
+                      <th>Started (IST)</th>
+                      <th>Finished (IST)</th>
+                      <th>Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{data.last_run.id}</td>
+                      <td>{data.last_run.status}</td>
+                      <td>{data.last_run.processed}</td>
+                      <td>{date(data.last_run.started_at)}</td>
+                      <td>{date(data.last_run.finished_at)}</td>
+                      <td>{data.last_run.error_code || 'No recorded error'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                {data.last_run.status === 'TEST_ONLY' && (
+                  <p>
+                    Subscriber alert dispatch was not enabled or did not pass readiness. Only
+                    confirmation and test emails were eligible for processing. This run ID
+                    identifies a worker batch, not an individual delivery.
+                  </p>
+                )}
+              </div>
             ) : (
               <p>No dispatch recorded.</p>
             )}
             <h3>Recent failures</h3>
+            <p>
+              Latest 25 error records updated within the selected operational period. Historical
+              failures do not establish that sending is still failing. Updated time is the record
+              timestamp, not a confirmed delivery time.
+            </p>
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
                     <th>Delivery ID</th>
+                    <th>Created (IST)</th>
+                    <th>Updated (IST)</th>
                     <th>Type</th>
                     <th>Status</th>
                     <th>Attempts</th>
@@ -470,10 +512,21 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
                   {data.failures.map((row) => (
                     <tr key={row.id}>
                       <td>{row.id}</td>
+                      <td>{date(row.created_at)}</td>
+                      <td>{date(row.updated_at)}</td>
                       <td>{row.kind}</td>
                       <td>{row.status}</td>
                       <td>{row.attempts}</td>
-                      <td>{row.code}</td>
+                      <td>
+                        {row.code}
+                        {row.code === 'SES_ACCESS_DENIED' && (
+                          <small className="admin-cell-help">
+                            SES rejected authorization. Review the worker IAM send policy and
+                            sender/configuration-set permissions. Automatic retry is not enabled for
+                            this error.
+                          </small>
+                        )}
+                      </td>
                       <td>
                         {date(row.retry_at)}
                         {row.eligible_retry && (

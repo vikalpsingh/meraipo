@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     ses_configuration_set: str = "meraipo-ipo-alerts"
     ses_sns_topic_arn: str = ""
     email_open_tracking_enabled: bool = False
-    email_send_hour_ist: int = Field(default=8, ge=0, le=23)
+    email_send_hour_ist: int = Field(default=9, ge=0, le=23)
     email_event_retention_days: int = Field(default=400, ge=90, le=730)
     ga4_property_id: str = ""
     ga4_service_account_file: str = ""
