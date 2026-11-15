@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import html
+import json
 import random
 import re
 from datetime import datetime, time, timedelta
@@ -20,6 +21,7 @@ from packages.database.session import Session, engine
 from packages.providers.ses_readiness import sender
 from packages.shared.calculations import utc
 from packages.shared.config import settings
+from packages.shared.confirmation_email import confirmation_content
 from packages.shared.email_alerts import (
     CAMPAIGN,
     active,
@@ -301,14 +303,14 @@ async def send_one(db, key, approved=False):
             row.status = "EXPIRED"
             await db.commit()
             return
-        subject = (
-            "Reminder: confirm your MeraIPO email alerts"
-            if row.reminder_week
-            else "Confirm your MeraIPO email alerts"
+        profile = (
+            json.loads(decrypt_secret(row.requested_profile_encrypted))
+            if row.requested_profile_encrypted
+            else {}
         )
-        text = f"You requested MeraIPO email alerts or a preference update. Confirm within 24 hours:\n{origin}/email-alerts/verify#{action}\nIgnore this email if you did not request it."
-        if row.reminder_week:
-            text += f"\nStop confirmation reminders: {origin}/email-alerts/unsubscribe#{action}"
+        subject, text, markup = confirmation_content(
+            origin, action, profile.get("gmp_band"), bool(row.reminder_week)
+        )
     else:
         campaign = await db.get(m.EmailCampaign, row.campaign_id)
         if campaign.digest_key:

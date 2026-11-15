@@ -111,6 +111,6 @@ after that three-week window. Failed, missed or expired reminders are not extend
 beyond the window. Manual bulk reminders share the same weekly reservations and cap,
 and apply across all eligible pending registrations, not only the visible page.
 Confirmed, unsubscribed, suppressed and test-only recipients are excluded. Each reminder
-copies the latest pending profile into a fresh confirmation delivery with a 24-hour token.
+copies the latest pending profile into a fresh confirmation delivery with a seven-day token.
 Reminder emails include a stop-reminders link. Sending is performed by the existing
 rate-limited outbox. Deploy migration 20261114_confirm_reminders before API/worker/scheduler.

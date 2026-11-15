@@ -98,7 +98,7 @@ def classify_click(user_agent, purpose=""):
 def token_expired(row):
     from packages.shared.calculations import utc
 
-    return utc(row.created_at) < m.now() - timedelta(hours=24)
+    return utc(row.created_at) <= m.now() - timedelta(days=7)
 
 
 async def control(db, lock=False):

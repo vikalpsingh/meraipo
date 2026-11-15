@@ -126,6 +126,33 @@ export default async function Home({
           <IPOSearch key={query} query={query} />
         </div>
       </div>
+      {flags.email_alerts && (
+        <aside className="home-alert-invitation" aria-labelledby="home-alert-title">
+          <span className="home-alert-icon" aria-hidden="true">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+            >
+              <rect x="3" y="5" width="18" height="14" rx="3" />
+              <path d="m4 7 8 6 8-6" />
+            </svg>
+          </span>
+          <div className="home-alert-copy">
+            <h2 id="home-alert-title">Your IPO interests. Straight to your inbox.</h2>
+            <p>
+              Opening-day alerts matched to your GMP preference. Only relevant IPO updates.
+              Unsubscribe anytime.
+            </p>
+          </div>
+          <Link className="home-alert-link" href="/email-alerts">
+            Get IPO alerts <span aria-hidden="true">→</span>
+          </Link>
+        </aside>
+      )}
       <BrokerShortcuts />
       {query ? (
         <p className="search-feedback" role="status">
