@@ -32,6 +32,7 @@ from packages.shared.email_alerts import (
     token_expired,
     within_window,
 )
+from packages.shared.email_brokers import broker_content
 from packages.shared.email_digest import UNSUBSCRIBE, digest_is_current, prepare_digests
 from packages.shared.email_policy import production_checks
 from packages.shared.email_preferences import current_band, matching_preferences
@@ -394,6 +395,16 @@ async def send_one(db, key, approved=False):
             )
             chart_png = template.get("chart_png")
             subject, text, markup = template["subject"], template["text"], template["html"]
+    if row.kind == "ALERT":
+        profile = (
+            json.loads(decrypt_secret(subscriber.contact_encrypted))
+            if subscriber.contact_encrypted
+            else {}
+        )
+        broker_text, broker_html = broker_content(profile.get("broker"))
+        text += broker_text
+        if markup and broker_html:
+            markup = markup.replace("</body>", broker_html + "</body>")
     try:
         message_id = await asyncio.to_thread(
             ses_send,

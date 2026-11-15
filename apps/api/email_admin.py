@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, StrictBool
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 
 from apps.api.feedback_routes import insert_for
 from apps.api.security import admin
@@ -438,6 +438,7 @@ async def subscribers(
                 id=row.id,
                 first_name=profile.get("first_name"),
                 last_name=profile.get("last_name"),
+                broker=profile.get("broker", "other"),
                 email=decrypt_secret(row.email_encrypted),
                 gmp_band=row.gmp_band or profile.get("gmp_band"),
                 status="Suppressed"
@@ -462,3 +463,79 @@ async def remind_subscribers(auth=Depends(admin), db=Depends(get_session)):
     audit(db, auth, "email.confirmation_reminders", {"queued": result["queued"]})
     await db.commit()
     return result
+
+
+class SubscriberEdit(BaseModel):
+    first_name: str
+    last_name: str
+    gmp_band: str
+    broker: str = "other"
+
+
+@router.put("/subscribers/{subscriber_id}")
+async def edit_subscriber(
+    subscriber_id: str, data: SubscriberEdit, auth=Depends(admin), db=Depends(get_session)
+):
+    from packages.shared.email_preferences import validate_profile
+
+    row = await db.get(m.EmailSubscriber, subscriber_id, with_for_update=True)
+    if not row:
+        raise HTTPException(404, "Subscriber not found")
+    try:
+        profile = validate_profile(data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    # Preserve optional contact data and confirmation/suppression state.
+    previous = json.loads(decrypt_secret(row.contact_encrypted)) if row.contact_encrypted else {}
+    profile["phone"] = previous.get("phone")
+    if row.verified_at:
+        row.contact_encrypted = encrypt_secret(
+            json.dumps({k: v for k, v in profile.items() if k != "gmp_band"})
+        )
+        row.gmp_band = profile["gmp_band"]
+    await db.execute(
+        update(m.EmailDelivery)
+        .where(
+            m.EmailDelivery.subscriber_id == row.id,
+            m.EmailDelivery.kind == "VERIFY",
+            m.EmailDelivery.status != "CONFIRMED",
+        )
+        .values(requested_profile_encrypted=encrypt_secret(json.dumps(profile)))
+    )
+    audit(db, auth, "email.subscriber.edit", {"subscriber_id": row.id})
+    await db.commit()
+    return {"message": "Subscriber updated. Confirmation and suppression status were preserved."}
+
+
+@router.delete("/subscribers/{subscriber_id}")
+async def delete_subscriber(subscriber_id: str, auth=Depends(admin), db=Depends(get_session)):
+    row = await db.get(m.EmailSubscriber, subscriber_id, with_for_update=True)
+    if not row:
+        raise HTTPException(404, "Subscriber not found")
+    deliveries = select(m.EmailDelivery.id).where(m.EmailDelivery.subscriber_id == row.id)
+    if await db.scalar(
+        select(m.EmailDelivery.id)
+        .where(
+            m.EmailDelivery.subscriber_id == row.id,
+            m.EmailDelivery.status.in_(["SENDING", "UNCERTAIN"]),
+        )
+        .limit(1)
+    ):
+        raise HTTPException(
+            409, "A delivery is in progress or uncertain. Reconcile it before deleting."
+        )
+    await db.execute(
+        update(m.EmailControl)
+        .where(m.EmailControl.test_delivery_id.in_(deliveries))
+        .values(test_delivery_id=None, test_received_at=None, test_config_hash=None)
+    )
+    await db.execute(delete(m.EmailClickEvent).where(m.EmailClickEvent.delivery_id.in_(deliveries)))
+    await db.execute(
+        delete(m.EmailDeliveryEvent).where(m.EmailDeliveryEvent.delivery_id.in_(deliveries))
+    )
+    await db.execute(delete(m.EmailReservation).where(m.EmailReservation.subscriber_id == row.id))
+    await db.execute(delete(m.EmailDelivery).where(m.EmailDelivery.subscriber_id == row.id))
+    await db.delete(row)
+    audit(db, auth, "email.subscriber.delete", {"subscriber_id": subscriber_id})
+    await db.commit()
+    return {"message": "Subscriber and associated delivery records deleted."}

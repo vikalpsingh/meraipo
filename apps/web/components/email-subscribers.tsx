@@ -8,6 +8,7 @@ type Data = {
     last_name: string | null;
     email: string;
     gmp_band: string | null;
+    broker: string;
     status: string;
     created_at: string;
   }[];
@@ -63,6 +64,32 @@ export function EmailSubscribers({ csrf }: { csrf: string }) {
       setReminderMessage(e instanceof Error ? e.message : 'Could not queue reminders.');
     } finally {
       setReminderBusy(false);
+    }
+  }
+  const [editing, setEditing] = useState<Data['items'][number] | null>(null);
+  const [deleting, setDeleting] = useState<Data['items'][number] | null>(null);
+  const [recordMessage, setRecordMessage] = useState('');
+  const [recordBusy, setRecordBusy] = useState(false);
+  async function changeRecord(id: string, method: string, body?: object) {
+    setRecordBusy(true);
+    setRecordMessage('');
+    try {
+      const response = await fetch(`/api/v1/admin/email/subscribers/${id}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error?.message || result.detail || 'Could not update subscriber.');
+      setRecordMessage(result.message);
+      setEditing(null);
+      setDeleting(null);
+      setRefresh((v) => v + 1);
+    } catch (e) {
+      setRecordMessage(e instanceof Error ? e.message : 'Request failed.');
+    } finally {
+      setRecordBusy(false);
     }
   }
   const [data, setData] = useState<Data | null>(null);
@@ -157,6 +184,75 @@ export function EmailSubscribers({ csrf }: { csrf: string }) {
         </button>
         <p role="status">{reminderMessage}</p>
       </div>
+      <p role="status">{recordMessage}</p>
+      {editing && (
+        <form
+          className="panel"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const values = new FormData(e.currentTarget);
+            void changeRecord(editing.id, 'PUT', Object.fromEntries(values));
+          }}
+        >
+          <h3>Edit {editing.email}</h3>
+          <p>
+            Email is the unique identity and cannot be changed here. This does not confirm a pending
+            address.
+          </p>
+          <label>
+            First name
+            <input name="first_name" required defaultValue={editing.first_name || ''} />
+          </label>
+          <label>
+            Last name
+            <input name="last_name" required defaultValue={editing.last_name || ''} />
+          </label>
+          <label>
+            GMP preference
+            <select name="gmp_band" defaultValue={editing.gmp_band || 'white'}>
+              {Object.entries(bands).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Broker
+            <select name="broker" defaultValue={editing.broker || 'other'}>
+              {Object.entries({
+                zerodha: 'Zerodha',
+                groww: 'Groww',
+                angel_one: 'Angel One',
+                upstox: 'Upstox',
+                other: 'Others',
+              }).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button disabled={recordBusy}>Save changes</button>
+          <button type="button" disabled={recordBusy} onClick={() => setEditing(null)}>
+            Cancel
+          </button>
+        </form>
+      )}
+      {deleting && (
+        <div className="panel" role="alert">
+          <p>
+            Delete {deleting.email} and their delivery history? This permanently removes the record
+            and stops queued emails. Deletion also removes suppression history.
+          </p>
+          <button disabled={recordBusy} onClick={() => changeRecord(deleting.id, 'DELETE')}>
+            Confirm deletion
+          </button>
+          <button disabled={recordBusy} onClick={() => setDeleting(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
       {busy && <p role="status">Loading subscribers…</p>}
       {error && <p role="alert">{error}</p>}
       {data && (
@@ -224,7 +320,9 @@ export function EmailSubscribers({ csrf }: { csrf: string }) {
                   <th>Email</th>
                   <th>GMP preference</th>
                   <th>Status</th>
+                  <th>Broker</th>
                   <th>Registered (IST)</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -238,7 +336,28 @@ export function EmailSubscribers({ csrf }: { csrf: string }) {
                       <strong>{row.status}</strong>
                       <small className="admin-cell-help">{statuses[row.status]?.meaning}</small>
                     </td>
+                    <td>{row.broker || 'Not selected'}</td>
                     <td>{timestamp(row.created_at)}</td>
+                    <td>
+                      <button
+                        disabled={recordBusy}
+                        onClick={() => {
+                          setEditing(row);
+                          setDeleting(null);
+                        }}
+                      >
+                        Modify
+                      </button>
+                      <button
+                        disabled={recordBusy}
+                        onClick={() => {
+                          setDeleting(row);
+                          setEditing(null);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

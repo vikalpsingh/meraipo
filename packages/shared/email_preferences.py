@@ -42,7 +42,10 @@ def validate_profile(body):
         or not 7 <= len(re.sub(r"\D", "", phone)) <= 15
     ):
         raise ValueError("Invalid phone")
-    profile.update(phone=phone or None, gmp_band=band)
+    broker = body.get("broker", "other")
+    if broker not in ("zerodha", "groww", "angel_one", "upstox", "other"):
+        raise ValueError("Select a broker")
+    profile.update(phone=phone or None, gmp_band=band, broker=broker)
     return profile
 
 

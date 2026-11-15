@@ -30,3 +30,29 @@ def test_next_run_skips_disabled_weekends(saturday, sunday, day):
 def test_rejects_unsupported_interval():
     with pytest.raises(ValidationError):
         ScheduleInput(times=["07:00"], paused=False, frequency="hourly", interval_hours=3)
+
+
+async def test_ipo_default_and_saved_schedule_precedence(db):
+    from packages.database import models as m
+    from packages.shared.config import settings
+    from packages.shared.job_schedules import schedule_state
+
+    state = await schedule_state(db, "sync-ipos", settings())
+    assert state["times"] == ["00:30"] and state["interval_hours"] == 12
+    assert state["frequency"] == "hourly"
+    assert not state["saturday_enabled"] and not state["sunday_enabled"]
+    db.add(
+        m.SchedulerControl(
+            name="sync-ipos",
+            paused=True,
+            schedule_times=["07:15"],
+            frequency="hourly",
+            interval_hours=6,
+            saturday_enabled=True,
+            sunday_enabled=True,
+        )
+    )
+    await db.commit()
+    saved = await schedule_state(db, "sync-ipos", settings())
+    assert saved["times"] == ["07:15"] and saved["interval_hours"] == 6
+    assert saved["paused"] and saved["saturday_enabled"] and saved["sunday_enabled"]

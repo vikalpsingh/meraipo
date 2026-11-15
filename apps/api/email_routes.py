@@ -91,6 +91,20 @@ async def subscribe(request: Request, db=Depends(get_session)):
     subscriber = await db.scalar(
         select(m.EmailSubscriber).where(m.EmailSubscriber.email_hash == identity).with_for_update()
     )
+    if (
+        subscriber.verified_at
+        and not subscriber.unsubscribed_at
+        and not subscriber.suppressed_at
+        and body.get("confirm_override") is not True
+    ):
+        return JSONResponse(
+            {
+                "override_required": True,
+                "message": "This email already has an active subscription. Confirm that you want to replace its saved preferences. Changes still require email confirmation.",
+            },
+            status_code=409,
+            headers={"Cache-Control": "no-store"},
+        )
     recent = await db.scalar(
         select(m.EmailDelivery)
         .where(

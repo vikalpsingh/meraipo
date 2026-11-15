@@ -17,7 +17,7 @@ EXCHANGE_JOBS = {
 }
 SCHEDULED_JOBS = {**EXCHANGE_JOBS, "sync-ipos": ("IPO, subscription & GMP sync", "ipos", None)}
 DEFAULT_TIMES = dict(
-    zip(SCHEDULED_JOBS, ["19:00", "20:00", "21:00", "22:00", "23:00"], strict=True)
+    zip(SCHEDULED_JOBS, ["19:00", "20:00", "21:00", "22:00", "00:30"], strict=True)
 )
 
 
@@ -40,11 +40,13 @@ async def schedule_state(db, job, config):
         "times": sorted(times),
         "paused": paused,
         "source_enabled": enabled,
-        "frequency": control.frequency if control else "daily",
+        "frequency": control.frequency
+        if control
+        else ("hourly" if job == "sync-ipos" else "daily"),
         "weekday": control.weekday if control else 0,
-        "interval_hours": control.interval_hours if control else 1,
-        "saturday_enabled": control.saturday_enabled if control else True,
-        "sunday_enabled": control.sunday_enabled if control else True,
+        "interval_hours": control.interval_hours if control else (12 if job == "sync-ipos" else 1),
+        "saturday_enabled": control.saturday_enabled if control else job != "sync-ipos",
+        "sunday_enabled": control.sunday_enabled if control else job != "sync-ipos",
     }
 
 

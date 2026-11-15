@@ -13,6 +13,8 @@ export function EmailSubscription({
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [override, setOverride] = useState(false);
+  const [overrideMessage, setOverrideMessage] = useState('');
   useEffect(() => {
     if (action !== 'subscribe' && window.location.hash) {
       // Transfer a private fragment to memory once, then remove it from the address bar.
@@ -35,7 +37,11 @@ export function EmailSubscription({
           body: JSON.stringify(
             action === 'subscribe'
               ? {
-                  email: values.get('email'),
+                  email: String(values.get('email') || '')
+                    .trim()
+                    .toLowerCase(),
+                  broker: values.get('broker'),
+                  confirm_override: override,
                   first_name: values.get('first_name'),
                   last_name: values.get('last_name'),
                   phone: values.get('phone'),
@@ -47,6 +53,11 @@ export function EmailSubscription({
         },
       );
       const data = await response.json();
+      if (response.status === 409 && data.override_required) {
+        setOverride(true);
+        setOverrideMessage(data.message);
+        return;
+      }
       if (!response.ok) {
         const reason =
           response.status === 429
@@ -86,9 +97,28 @@ export function EmailSubscription({
           : 'Use the button below to complete your request.'}
       </p>
       {!done && (
-        <form onSubmit={submit}>
+        <form
+          onSubmit={submit}
+          onChange={() => {
+            setOverride(false);
+            setOverrideMessage('');
+          }}
+        >
           {action === 'subscribe' ? (
             <>
+              <label>
+                Current demat broker
+                <select name="broker" defaultValue="" required>
+                  <option value="" disabled>
+                    Select your broker
+                  </option>
+                  <option value="zerodha">Zerodha</option>
+                  <option value="groww">Groww</option>
+                  <option value="angel_one">Angel One</option>
+                  <option value="upstox">Upstox</option>
+                  <option value="other">Others</option>
+                </select>
+              </label>
               <div className="signup-fields">
                 <label>
                   First name
@@ -169,11 +199,14 @@ export function EmailSubscription({
             {busy
               ? 'Please wait…'
               : action === 'subscribe'
-                ? 'Subscribe to IPO alerts'
+                ? override
+                  ? 'Confirm preference replacement'
+                  : 'Subscribe to IPO alerts'
                 : action === 'verify'
                   ? 'Confirm subscription'
                   : 'Unsubscribe'}
           </button>
+          {overrideMessage && <p role="alert">{overrideMessage}</p>}
         </form>
       )}
       <div role="status" aria-live="polite" aria-atomic="true">

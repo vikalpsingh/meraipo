@@ -35,6 +35,7 @@ it('requires explicit consent, names and a single GMP band with optional phone',
   fireEvent.change(screen.getByLabelText('Surname (last name)*'), { target: { value: 'Person' } });
   expect(screen.getByLabelText('Phone No (optional)')).not.toBeRequired();
   expect(screen.getAllByRole('radio')).toHaveLength(4);
+  fireEvent.change(screen.getByLabelText('Current demat broker'), { target: { value: 'groww' } });
   fireEvent.click(screen.getByLabelText('Gold: above 100%'));
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Subscribe to IPO alerts' }));
@@ -42,6 +43,8 @@ it('requires explicit consent, names and a single GMP band with optional phone',
   expect(screen.getByRole('status')).toHaveTextContent('after you confirm your email');
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
     email: 'person@example.com',
+    broker: 'groww',
+    confirm_override: false,
     first_name: 'Test',
     last_name: 'Person',
     phone: '',
