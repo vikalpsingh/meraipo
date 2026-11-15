@@ -34,8 +34,8 @@ it('requires explicit consent, names and a single GMP band with optional phone',
   fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Test' } });
   fireEvent.change(screen.getByLabelText('Surname (last name)*'), { target: { value: 'Person' } });
   expect(screen.getByLabelText('Phone No (optional)')).not.toBeRequired();
-  expect(screen.getAllByRole('radio')).toHaveLength(4);
-  fireEvent.change(screen.getByLabelText('Current demat broker'), { target: { value: 'groww' } });
+  expect(screen.getAllByRole('radio')).toHaveLength(9);
+  fireEvent.click(screen.getByRole('radio', { name: 'Groww' }));
   fireEvent.click(screen.getByLabelText('Gold: above 100%'));
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Subscribe to IPO alerts' }));

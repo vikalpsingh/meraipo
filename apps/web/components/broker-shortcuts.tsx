@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { brokers } from '@/lib/brokers';
 
-function BrokerIcon({ icon, initials }: { icon?: string; initials: string }) {
+export function BrokerIcon({ icon, initials }: { icon?: string; initials: string }) {
   const [failed, setFailed] = useState(false);
   return (
     <span className="broker-icon" aria-hidden="true">

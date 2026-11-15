@@ -2683,3 +2683,16 @@ body:has(.company-preview[open]) {
   .home-alert-copy h2 { font-size:16px; }
   .home-alert-link { grid-column:1 / -1; }
 }
+
+.email-signup .signup-broker-picker { min-width:0; margin:20px 0; padding:18px; border:1px solid #b5d6c7; border-radius:14px; background:#f3faf6; }
+.signup-broker-picker legend { padding:0 8px; font-size:20px; font-weight:800; color:#104d39; }
+.signup-broker-picker p { margin:0 0 14px; color:#466354; font-size:13px; line-height:1.5; }
+.signup-broker-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.email-signup .signup-broker-options label { display:flex; align-items:center; gap:10px; margin:0; min-height:58px; padding:10px 12px; border:1px solid #a6bdb1; border-radius:10px; background:white; font-size:14px; font-weight:700; cursor:pointer; }
+.signup-broker-options input { flex:0 0 auto; width:16px; height:16px; accent-color:#12624b; }
+.email-signup .signup-broker-options label:has(:checked) { border:2px solid #12624b; padding:9px 11px; background:#e2f5e9; }
+.signup-broker-options label:focus-within { outline:3px solid #b57815; outline-offset:2px; }
+.tracker-coverage { margin:0 0 20px; padding:14px 18px; border-left:3px solid #187258; border-radius:0 8px 8px 0; background:#edf5f1; color:#294d3f; font-size:13px; line-height:1.6; }
+.tracker-coverage strong { font-size:14px; }
+.tracker-coverage p { margin:4px 0 0; }
+@media(max-width:380px) { .signup-broker-options { grid-template-columns:1fr; } }

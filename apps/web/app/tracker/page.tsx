@@ -54,6 +54,14 @@ export default async function Tracker({
         </div>
         <span className="badge">{data.total} companies in this view</span>
       </div>
+      <aside className="tracker-coverage" aria-label="IPO data coverage">
+        <strong>Our coverage starts on 1 October 2026.</strong>
+        <p>
+          MeraIPO began capturing IPO data from this date, using market data sources including NSE,
+          BSE and IPOAlerts. This tracker shows companies available in our collected records, not
+          every company listed on the exchanges. Coverage and update dates vary by source.
+        </p>
+      </aside>
       <nav className="screen-tabs" aria-label="Screening views">
         {views.map(([value, label]) => (
           <Link

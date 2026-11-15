@@ -1,5 +1,7 @@
 'use client';
 import Link from 'next/link';
+import { brokers } from '@/lib/brokers';
+import { BrokerIcon } from './broker-shortcuts';
 import { useEffect, useState } from 'react';
 
 export function EmailSubscription({
@@ -106,19 +108,31 @@ export function EmailSubscription({
         >
           {action === 'subscribe' ? (
             <>
-              <label>
-                Current demat broker
-                <select name="broker" defaultValue="" required>
-                  <option value="" disabled>
-                    Select your broker
-                  </option>
-                  <option value="zerodha">Zerodha</option>
-                  <option value="groww">Groww</option>
-                  <option value="angel_one">Angel One</option>
-                  <option value="upstox">Upstox</option>
-                  <option value="other">Others</option>
-                </select>
-              </label>
+              <fieldset className="signup-broker-picker" aria-describedby="broker-picker-help">
+                <legend>Current demat broker</legend>
+                <p id="broker-picker-help">
+                  Choose your broker to get its IPO application link in your alerts.
+                </p>
+                <div className="signup-broker-options">
+                  {brokers.map((broker) => (
+                    <label key={broker.name}>
+                      <input
+                        type="radio"
+                        name="broker"
+                        value={broker.name.toLowerCase().replaceAll(' ', '_')}
+                        required
+                      />
+                      <BrokerIcon icon={broker.icon} initials={broker.initials} />
+                      <span>{broker.name}</span>
+                    </label>
+                  ))}
+                  <label>
+                    <input type="radio" name="broker" value="other" required />
+                    <BrokerIcon initials="…" />
+                    <span>Others</span>
+                  </label>
+                </div>
+              </fieldset>
               <div className="signup-fields">
                 <label>
                   First name
