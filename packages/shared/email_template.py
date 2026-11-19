@@ -83,6 +83,7 @@ async def content(
     opening=False,
     inline_attachment=False,
     test_category=None,
+    closing=False,
 ):
     ipo = await db.get(m.IPO, ipo_id)
     if not ipo:
@@ -123,8 +124,10 @@ async def content(
 
     rows = [
         (
-            "Opening date" if opening else "Listing date",
-            str(dates.open_date if opening else dates.listing_date) if dates else "N/A",
+            "Closing date" if closing else "Opening date" if opening else "Listing date",
+            str(dates.close_date if closing else dates.open_date if opening else dates.listing_date)
+            if dates
+            else "N/A",
         ),
         (price_label, money(price)),
         ("Unofficial GMP", money(premium) + (" · stale snapshot" if stale else "")),
@@ -157,7 +160,7 @@ async def content(
     disclaimer = "GMP is unofficial. The estimated gain assumes the stated GMP over the issue price or upper band; it is not a guaranteed listing price or return. IPO investing involves loss risk. Verify dates and data before deciding."
     subject = (
         ("TEST — " if test else "")
-        + f"MeraIPO | {company.name} {'Opens Today' if opening else 'Lists Tomorrow'} — Key IPO Details"
+        + f"MeraIPO | {company.name} {'Closes Today' if closing else 'Opens Today' if opening else 'Lists Tomorrow'} — Key IPO Details"
     )
     if test_category:
         label = CATEGORY_LABELS[test_category]
@@ -211,7 +214,9 @@ async def content(
         for k, v in rows
     )
     home_link = escape(homepage, quote=True)
-    edition = ("TEST · " if test else "") + ("Opening day" if opening else "Listing tomorrow")
+    edition = ("TEST · " if test else "") + (
+        "Last application day" if closing else "Opening day" if opening else "Listing tomorrow"
+    )
     if test_category:
         edition = f"Category test · {CATEGORY_LABELS[test_category]}"
     markup = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -241,7 +246,8 @@ async def content(
             if same_day and not stale and price and price > 0 and price + premium >= 0
             else None,
             rendered_at.astimezone(IST).strftime("%d %b %Y %H:%M IST"),
-            dates.open_date if dates else "Unconfirmed",
+            (dates.close_date if closing else dates.open_date) if dates else "Unconfirmed",
+            closing=closing,
         )
         src = (
             "cid:ipo-price-chart"

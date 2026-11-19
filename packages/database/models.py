@@ -738,6 +738,7 @@ class EmailReservation(Base):
 
 
 class EmailControl(Base):
+    application_schedule: Mapped[dict] = mapped_column(JSON, default=dict)
     __tablename__ = "email_control"
     id: Mapped[str] = mapped_column(String(20), primary_key=True, default="email")
     sending_enabled: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -6,17 +6,25 @@ from textwrap import wrap
 from PIL import Image, ImageDraw, ImageFont
 
 
-def render(name, price, premium, stamp, opening_date):
+def render(name, price, premium, stamp, opening_date, closing=False):
     image = Image.new("RGB", (1200, 630), "#103c3d")
     draw = ImageDraw.Draw(image)
 
     def label(x, y, text, size=28, color="#ffffff"):
         draw.text((x, y), text, font=ImageFont.load_default(size=size), fill=color)
 
-    label(54, 34, "MERAIPO  /  OPENING DAY", 26, "#77e1bb")
+    label(
+        54,
+        34,
+        "MERAIPO  /  LAST APPLICATION DAY" if closing else "MERAIPO  /  OPENING DAY",
+        26,
+        "#77e1bb",
+    )
     for i, line in enumerate(wrap(name, width=43)[:2]):
         label(54, 94 + i * 46, line, 38)
-    label(54, 202, "Opens " + str(opening_date) + "  |  meraipo.com", 25)
+    label(
+        54, 202, ("Closes " if closing else "Opens ") + str(opening_date) + "  |  meraipo.com", 25
+    )
     draw.rounded_rectangle((44, 254, 1156, 480), radius=18, fill="#1c5050")
     label(70, 278, "IPO upper band", 24, "#b4d8d0")
     label(70, 318, f"INR {price:,.2f}" if price else "Not available", 39)

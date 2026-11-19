@@ -19,6 +19,7 @@ from apps.worker.tasks import celery
 from packages.database import models as m
 from packages.database.session import Session, engine
 from packages.providers.ses_readiness import sender
+from packages.shared import email_schedule
 from packages.shared.calculations import utc
 from packages.shared.config import settings
 from packages.shared.confirmation_email import confirmation_content
@@ -45,7 +46,8 @@ async def prepare(db):
         return
     config = settings()
     today = m.now().astimezone(ZoneInfo("Asia/Kolkata"))
-    if today.hour < config.email_send_hour_ist:
+    schedule = await email_schedule.load(db)
+    if not email_schedule.in_window(schedule, today):
         return
     listings = (
         await db.execute(
@@ -55,7 +57,8 @@ async def prepare(db):
             .join(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
             .where(
                 (m.IPODate.listing_date == today.date() + timedelta(days=1))
-                | (m.IPODate.open_date == today.date()),
+                | (m.IPODate.open_date == today.date())
+                | (m.IPODate.close_date == today.date()),
                 m.Company.is_demo.is_(False),
             )
         )
@@ -313,9 +316,13 @@ async def send_one(db, key, approved=False):
             origin, action, profile.get("gmp_band"), bool(row.reminder_week)
         )
     else:
-        campaign = await db.get(m.EmailCampaign, row.campaign_id)
-        if campaign.digest_key:
-            if not await digest_is_current(db, campaign, subscriber):
+        campaign_cache = db.info.setdefault("email_campaign_cache", {})
+        campaign = campaign_cache.get(row.campaign_id)
+        if campaign is None:
+            campaign = await db.get(m.EmailCampaign, row.campaign_id)
+            campaign_cache[row.campaign_id] = campaign
+        if campaign.digest_key or campaign.kind.startswith("application_test:"):
+            if row.kind == "ALERT" and not await digest_is_current(db, campaign, subscriber):
                 row.status = "CANCELLED"
                 row.error_code = "DIGEST_NO_LONGER_ELIGIBLE"
                 await db.commit()

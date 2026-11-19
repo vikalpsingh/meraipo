@@ -2,6 +2,7 @@
 
 import json
 from datetime import timedelta
+from typing import Literal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from apps.api.security import admin
 from packages.database import models as m
 from packages.database.session import get_session
 from packages.providers.ses_readiness import config_hash, readiness
+from packages.shared import email_schedule
 from packages.shared.calculations import utc
 from packages.shared.config import settings
 from packages.shared.email_alerts import (
@@ -23,6 +25,7 @@ from packages.shared.email_alerts import (
     token,
     tracked_url,
 )
+from packages.shared.email_digest import build_payloads
 from packages.shared.email_policy import production_checks
 from packages.shared.email_preferences import BANDS
 from packages.shared.email_template import content
@@ -127,6 +130,7 @@ async def status(
     await db.commit()
     return {
         "sending_enabled": state.sending_enabled,
+        "application_schedule": await email_schedule.load(db),
         "send_hour_ist": settings().email_send_hour_ist,
         "readiness": checks,
         "counts": counts,
@@ -168,6 +172,110 @@ async def status(
             }
             for r in failures
         ],
+    }
+
+
+class ApplicationSchedule(BaseModel):
+    mode: Literal["opening", "closing", "both"]
+    time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+@router.put("/application-schedule")
+async def application_schedule(
+    data: ApplicationSchedule, auth=Depends(admin), db=Depends(get_session)
+):
+    state = await control(db, lock=True)
+    state.application_schedule = data.model_dump()
+    audit(db, auth, "email.application_schedule", data.model_dump())
+    await db.commit()
+    return {
+        "message": "Application schedule saved in IST. Applies to the next daily snapshot; existing queued digests are unchanged."
+    }
+
+
+@router.post("/application-test", status_code=202)
+async def application_test(auth=Depends(admin), db=Depends(get_session)):
+    await require_test_sender()
+    await control(db, lock=True)
+    recent = await db.scalar(
+        select(m.EmailCampaign.id)
+        .where(
+            m.EmailCampaign.kind.startswith("application_test:"),
+            m.EmailCampaign.created_at > m.now() - timedelta(minutes=5),
+        )
+        .limit(1)
+    )
+    if recent:
+        raise HTTPException(429, "Wait five minutes between application digest tests.")
+    today = m.now().astimezone(email_schedule.IST)
+    listings = (
+        await db.execute(
+            select(m.IPO, m.IPODate, m.ApplicantGuide)
+            .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+            .join(m.Company, m.Company.id == m.IPO.company_id)
+            .join(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
+            .where(
+                m.Company.is_demo.is_(False),
+                (m.IPODate.open_date == today.date()) | (m.IPODate.close_date == today.date()),
+            )
+        )
+    ).all()
+    config = await email_schedule.load(db)
+    payload = (await build_payloads(db, listings, today, config)).get("white")
+    if not payload or not payload["ipo_ids"]:
+        raise HTTPException(
+            409,
+            "No verified IPO matches today's selected opening/closing schedule. Check dates and confirmed applicant guides. Nothing was sent.",
+        )
+    payload["subject"] = "TEST | MeraIPO application reminders"
+    payload["text"] = (
+        "TEST — All IPOs preference; subscriber settings unchanged.\n" + payload["text"]
+    )
+    payload["html"] = payload["html"].replace(
+        "IPO application reminders", "IPO application reminders · TEST"
+    )
+    sub = await test_recipient(db, "meshanti.singh@gmail.com")
+    campaign = m.EmailCampaign(
+        ipo_id=payload["ipo_ids"][0],
+        kind="application_test:" + uuid4().hex[:8],
+        scheduled_date=today.date(),
+        digest_payload=payload,
+    )
+    db.add(campaign)
+    await db.flush()
+    row = delivery(sub.id, campaign.id)
+    row.kind = "TEST"
+    db.add(row)
+    audit(
+        db,
+        auth,
+        "email.application_test",
+        {"delivery_id": row.id, "ipo_count": len(payload["ipo_ids"]), "mode": config["mode"]},
+    )
+    await db.commit()
+    return {
+        "message": f"Queued one TEST email containing {len(payload['ipo_ids'])} IPO(s) to meshanti.singh@gmail.com. Delivery ID: {row.id}",
+        "id": row.id,
+    }
+
+
+@router.get("/application-test/{key}")
+async def application_test_status(key: str, auth=Depends(admin), db=Depends(get_session)):
+    row = await db.get(m.EmailDelivery, key)
+    campaign = await db.get(m.EmailCampaign, row.campaign_id) if row and row.campaign_id else None
+    if (
+        not row
+        or row.kind != "TEST"
+        or not campaign
+        or not campaign.kind.startswith("application_test:")
+    ):
+        raise HTTPException(404, "Application test not found")
+    return {
+        "id": row.id,
+        "status": row.status,
+        "accepted_at": row.accepted_at,
+        "delivered_at": row.delivered_at,
+        "error_code": row.error_code,
     }
 
 

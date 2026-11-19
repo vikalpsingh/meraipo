@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 
 from apps.api.feedback_routes import insert_for
 from packages.database import models as m
+from packages.shared import email_schedule
 from packages.shared.config import settings
 from packages.shared.email_alerts import delivery, tracked_url
 from packages.shared.email_preferences import (
@@ -18,10 +19,78 @@ from packages.shared.email_preferences import (
     current_band,
     matching_preferences,
 )
-from packages.shared.email_template import content, eligible_opening
+from packages.shared.email_template import content
 
 UNSUBSCRIBE = "__MERAIPO_DIGEST_UNSUBSCRIBE__"
 IST = ZoneInfo("Asia/Kolkata")
+
+
+async def build_payloads(db, listings, today, config):
+    opening = [
+        (ipo, dates, guide)
+        for ipo, dates, guide in listings
+        if email_schedule.occasion(ipo, dates, guide, today.date(), config["mode"])
+    ]
+    if not opening:
+        return {}
+    rendered = []
+    origin = settings().public_origin.rstrip("/")
+    for ipo, _dates, _guide in opening:
+        event = email_schedule.occasion(ipo, _dates, _guide, today.date(), config["mode"])
+        company = await db.get(m.Company, ipo.company_id)
+        band = await current_band(db, ipo)
+        item = await content(
+            db,
+            ipo.id,
+            tracked_url(origin + "/ipo/" + company.slug, company.slug, campaign="ipo_opening"),
+            UNSUBSCRIBE,
+            opening=True,
+            closing=event in ("closing", "opening_closing"),
+            inline_attachment=True,
+        )
+        # Each card keeps its image CID distinct inside the combined message.
+        image_id = "ipo-" + ipo.id
+        item["html"] = item["html"].replace("cid:ipo-price-chart", "cid:" + image_id)
+        attachment = None
+        if item.get("chart_png"):
+            attachment = {
+                "id": image_id,
+                "png": base64.b64encode(item["chart_png"]).decode("ascii"),
+            }
+        body = re.search(r"<body[^>]*>(.*)</body>", item["html"], flags=re.S).group(1)
+        # A single unsubscribe footer belongs to the digest, not each card.
+        body = re.sub(r'<tr><td bgcolor="#f2f6f4".*?</td></tr>', "", body, flags=re.S)
+        text = item["text"].split("\nUnsubscribe: ")[0]
+        rendered.append((ipo.id, band, body, text, attachment))
+    # Write all categories in one transaction, including empty categories.
+    # Subsequent ticks reuse this first snapshot, even when prices change.
+    payloads = {}
+    for category in BANDS:
+        matches = [item for item in rendered if category in matching_preferences(item[1])]
+        label = CATEGORY_LABELS[category]
+        title = f"MeraIPO | {len(matches)} IPO application reminders | {label}"
+        stamp = today.strftime("%d %b %Y, %I:%M %p IST")
+        payload = {
+            "schedule_mode": config["mode"],
+            "schedule_time": config["time"],
+            "category": category,
+            "ipo_ids": [item[0] for item in matches],
+            "subject": "MeraIPO | Today’s IPO alerts",
+            "text": title
+            + "\nSnapshot: "
+            + stamp
+            + "\n\n"
+            + "\n\n".join(item[3] for item in matches)
+            + "\nUnsubscribe: "
+            + UNSUBSCRIBE,
+            "html": '<html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#edf3f1;font-family:Arial,sans-serif">'
+            + f'<h1 style="font-size:22px;text-align:center">{escape(title)}</h1><p style="text-align:center">Snapshot: {stamp}</p>'
+            + "".join(item[2] for item in matches)
+            + f'<p style="text-align:center"><a href="{UNSUBSCRIBE}">Unsubscribe from IPO alerts</a></p></body></html>',
+            "attachments": [item[4] for item in matches if item[4]],
+        }
+        payloads[category] = payload
+    return payloads
 
 
 async def prepare_digests(db, listings, today):
@@ -47,74 +116,19 @@ async def prepare_digests(db, listings, today):
         ).all()
     )
     if not campaigns:
-        opening = [
-            (ipo, dates, guide)
-            for ipo, dates, guide in listings
-            if eligible_opening(ipo, dates, guide, today.date())
-        ]
-        if not opening:
-            return
-        rendered = []
-        origin = settings().public_origin.rstrip("/")
-        for ipo, _dates, _guide in opening:
-            company = await db.get(m.Company, ipo.company_id)
-            band = await current_band(db, ipo)
-            item = await content(
-                db,
-                ipo.id,
-                tracked_url(origin + "/ipo/" + company.slug, company.slug, campaign="ipo_opening"),
-                UNSUBSCRIBE,
-                opening=True,
-                inline_attachment=True,
-            )
-            # Each card keeps its image CID distinct inside the combined message.
-            image_id = "ipo-" + ipo.id
-            item["html"] = item["html"].replace("cid:ipo-price-chart", "cid:" + image_id)
-            attachment = None
-            if item.get("chart_png"):
-                attachment = {
-                    "id": image_id,
-                    "png": base64.b64encode(item["chart_png"]).decode("ascii"),
-                }
-            body = re.search(r"<body[^>]*>(.*)</body>", item["html"], flags=re.S).group(1)
-            # A single unsubscribe footer belongs to the digest, not each card.
-            body = re.sub(r'<tr><td bgcolor="#f2f6f4".*?</td></tr>', "", body, flags=re.S)
-            text = item["text"].split("\nUnsubscribe: ")[0]
-            rendered.append((ipo.id, band, body, text, attachment))
-        # Write all categories in one transaction, including empty categories.
-        # Subsequent ticks reuse this first snapshot, even when prices change.
-        for category in BANDS:
-            matches = [item for item in rendered if category in matching_preferences(item[1])]
-            label = CATEGORY_LABELS[category]
-            title = f"MeraIPO | {len(matches)} IPOs opening today | {label}"
-            stamp = today.strftime("%d %b %Y, %I:%M %p IST")
-            payload = {
-                "category": category,
-                "ipo_ids": [item[0] for item in matches],
-                "subject": "MeraIPO | Today’s IPO alerts",
-                "text": title
-                + "\nSnapshot: "
-                + stamp
-                + "\n\n"
-                + "\n\n".join(item[3] for item in matches)
-                + "\nUnsubscribe: "
-                + UNSUBSCRIBE,
-                "html": '<html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#edf3f1;font-family:Arial,sans-serif">'
-                + f'<h1 style="font-size:22px;text-align:center">{escape(title)}</h1><p style="text-align:center">Snapshot: {stamp}</p>'
-                + "".join(item[2] for item in matches)
-                + f'<p style="text-align:center"><a href="{UNSUBSCRIBE}">Unsubscribe from IPO alerts</a></p></body></html>',
-                "attachments": [item[4] for item in matches if item[4]],
-            }
+        config = await email_schedule.load(db)
+        payloads = await build_payloads(db, listings, today, config)
+        for category, payload in payloads.items():
             await db.execute(
                 insert_for(db, m.EmailCampaign)
                 .values(
-                    ipo_id=opening[0][0].id,
+                    ipo_id=next(p["ipo_ids"][0] for p in payloads.values() if p["ipo_ids"]),
                     kind="digest_" + category,
                     digest_key=key_prefix + category,
                     digest_payload=payload,
                     scheduled_date=today.date(),
                     scheduled_at=datetime.combine(
-                        today.date(), time(hour=settings().email_send_hour_ist), IST
+                        today.date(), time.fromisoformat(config["time"]), IST
                     ),
                 )
                 .on_conflict_do_nothing(index_elements=["digest_key"])
@@ -145,7 +159,10 @@ async def prepare_digests(db, listings, today):
             .where(
                 m.EmailDelivery.subscriber_id == m.EmailSubscriber.id,
                 m.EmailDelivery.kind == "ALERT",
-                m.EmailDelivery.status != "CANCELLED",
+                (
+                    (m.EmailDelivery.status != "CANCELLED")
+                    | (m.EmailDelivery.digest_date == today.date())
+                ),
                 m.EmailCampaign.scheduled_date == today.date(),
             )
             .exists()
@@ -185,7 +202,12 @@ async def prepare_digests(db, listings, today):
 
 async def digest_is_current(db, campaign, subscriber):
     now = m.now().astimezone(IST)
-    if campaign.scheduled_date != now.date() or now.hour < settings().email_send_hour_ist:
+    config = await email_schedule.load(db)
+    config = {
+        "mode": campaign.digest_payload.get("schedule_mode", "opening"),
+        "time": campaign.digest_payload.get("schedule_time", config["time"]),
+    }
+    if campaign.scheduled_date != now.date() or not email_schedule.in_window(config, now):
         return False
     if subscriber.gmp_band != campaign.digest_payload["category"]:
         return False
@@ -194,6 +216,10 @@ async def digest_is_current(db, campaign, subscriber):
         company = await db.get(m.Company, ipo.company_id) if ipo else None
         dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo_id))
         guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo_id))
-        if not company or company.is_demo or not eligible_opening(ipo, dates, guide, now.date()):
+        if (
+            not company
+            or company.is_demo
+            or not email_schedule.occasion(ipo, dates, guide, now.date(), config["mode"])
+        ):
             return False
     return True

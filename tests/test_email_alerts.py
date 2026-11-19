@@ -22,6 +22,7 @@ from packages.shared.market_config import encrypt_secret
 @pytest.fixture(autouse=True)
 def email_config(monkeypatch):
     monkeypatch.setattr("apps.worker.email_alerts.within_window", lambda: True)
+    monkeypatch.setattr("packages.shared.email_schedule.in_window", lambda *_: True)
     config = settings()
     for key, value in {
         "email_from": "alerts@example.com",
@@ -558,7 +559,7 @@ async def test_opening_digest_shared_snapshot_and_duplicate_prevention(db, monke
     await send_one(db, row.id, approved=True)
     await db.refresh(row)
     assert len(sent) == 1 and sent[0][1] == opening.digest_payload["subject"]
-    assert "opening today" in sent[0][2]
+    assert "IPO application reminders" in sent[0][2]
     assert "+101.00%" in sent[0][2]  # Immutable morning snapshot despite later quote changes.
     assert 'src="cid:ipo-' in sent[0][5]
     assert sent[0][7] and sent[0][7][0]["png"]

@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { EmailApplicationSchedule } from './email-application-schedule';
 import type { Company } from '@/lib/types';
 type Check = {
   ready: boolean;
@@ -17,6 +18,7 @@ type Check = {
 type Status = {
   sending_enabled: boolean;
   send_hour_ist?: number;
+  application_schedule?: { mode: 'opening' | 'closing' | 'both'; time: string };
   readiness: Check;
   counts: Record<string, number>;
   subscribers: Record<string, number>;
@@ -186,6 +188,18 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
         </div>
         <p role="status">{sampleMessage}</p>
       </form>
+      {data && (
+        <EmailApplicationSchedule
+          csrf={csrf}
+          config={
+            data.application_schedule || {
+              mode: 'opening',
+              time: String(data.send_hour_ist ?? 9).padStart(2, '0') + ':00',
+            }
+          }
+          onSaved={() => refresh()}
+        />
+      )}
       <details>
         <summary>Advanced tests, production settings and delivery reports</summary>
         <div className="email-filters">
@@ -219,10 +233,11 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
           <>
             <h3>Production dispatch</h3>
             <p>
-              Opening-day subscriber alerts start at{' '}
-              {String(data.send_hour_ist ?? 9).padStart(2, '0')}:00 IST. One combined email per
-              eligible subscriber, matched to their confirmed GMP preference, with an unsubscribe
-              link.
+              Application reminders start at{' '}
+              {data.application_schedule?.time ||
+                String(data.send_hour_ist ?? 9).padStart(2, '0') + ':00'}{' '}
+              IST. One combined email per eligible subscriber, matched to their confirmed GMP
+              preference, with an unsubscribe link.
             </p>
             <p>
               {data.sending_enabled

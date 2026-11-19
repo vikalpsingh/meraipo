@@ -95,7 +95,7 @@ export function EmailSubscription({
       </h1>
       <p>
         {action === 'subscribe'
-          ? 'Opening-day alerts from 9:00 AM IST, matched to your interests. Choose all IPOs or a minimum GMP threshold. One daily email combines matching IPOs opening that day. Every alert includes a link to unsubscribe on MeraIPO. GMP is unofficial and does not guarantee a listing gain.'
+          ? 'IPO application reminders, matched to your interests. Choose all IPOs or a minimum GMP threshold. One daily email combines matching IPOs on their opening or last application day, according to the alert schedule. Every alert includes a link to unsubscribe on MeraIPO. GMP is unofficial and does not guarantee a listing gain.'
           : 'Use the button below to complete your request.'}
       </p>
       {!done && (
