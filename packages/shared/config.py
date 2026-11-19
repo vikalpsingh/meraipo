@@ -9,6 +9,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    openai_api_key: SecretStr = SecretStr("")
+    openai_market_model: str = "gpt-6.2-astra"
+    x_enabled: bool = False
+    x_client_id: str = ""
+    x_client_secret: SecretStr = SecretStr("")
+    x_redirect_uri: str = ""
+    x_expected_user_id: str = ""
+    x_monthly_post_limit: int = Field(default=20, ge=1, le=500)
+    x_daily_attempt_limit: int = Field(default=1, ge=1, le=3)
+    x_max_age_hours: int = Field(default=24, ge=1, le=48)
     environment: str = "development"
     database_url: str = "postgresql+asyncpg://meraipo:meraipo@localhost:5432/meraipo"
     redis_url: str = "redis://localhost:6379/0"
@@ -55,7 +65,7 @@ class Settings(BaseSettings):
     market_scheduler_enabled: bool = False
     exchange_direct_enabled: bool = False
     nse_subscription_categories_enabled: bool = True
-    ipo_data_provider: Literal["exchange", "ipoalerts", "ipoweb", "feed"] = "ipoweb"
+    ipo_data_provider: Literal["exchange", "ipoalerts", "ipoweb", "feed"] = "ipoalerts"
     ipoalerts_api_key: SecretStr = SecretStr("")
     ipoweb_sources: list[Literal["nse", "bse", "ipowatch"]] = Field(
         default_factory=lambda: ["nse", "bse", "ipowatch"], min_length=1, max_length=3

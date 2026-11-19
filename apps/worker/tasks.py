@@ -17,7 +17,7 @@ config = settings()
 celery = Celery("meraipo", broker=config.redis_url, backend=config.redis_url)
 celery.conf.update(
     timezone="Asia/Kolkata",
-    imports=("apps.worker.email_alerts",),
+    imports=("apps.worker.email_alerts", "apps.worker.x_publishing"),
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
@@ -37,6 +37,13 @@ celery.conf.update(
 celery.conf.beat_schedule["weekly-confirmation-reminders"] = {
     "task": "meraipo.confirmation_reminders",
     "schedule": crontab(hour=9, minute=0, day_of_week="monday"),
+}
+
+celery.conf.beat_schedule["x-daily-market-feed"] = {
+    "task": "meraipo.x_daily", "schedule": crontab(minute="*"),
+}
+celery.conf.beat_schedule["x-publish-outbox"] = {
+    "task": "meraipo.x_outbox", "schedule": crontab(minute="*"),
 }
 
 # Independent email outbox; disabled unless explicitly configured.

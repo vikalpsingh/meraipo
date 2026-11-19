@@ -5,6 +5,7 @@ import { human, timestamp } from '@/lib/format';
 import { GuideEditor } from '@/components/guide-editor';
 import { MarketConsole } from '@/components/market-console';
 import { MarketConfig } from '@/components/market-config';
+import { XControlCenter } from '@/components/x-control-center';
 import { EmailSubscribers } from '@/components/email-subscribers';
 import { JobErrorLog } from '@/components/job-error-log';
 import { FeedbackInbox } from '@/components/feedback-inbox';
@@ -262,6 +263,7 @@ export default function Console() {
           'Analytics',
           'Email Control Center',
           'Email subscribers',
+          'X publishing',
           'Job error log',
           'Email Alerts Analytics',
           'Customer feedback',
@@ -757,6 +759,7 @@ export default function Console() {
         </section>
       )}
       {tab === 'Job error log' && <JobErrorLog />}
+      {tab === 'X publishing' && <XControlCenter csrf={session.csrf_token} />}
       {tab === 'Email subscribers' && <EmailSubscribers csrf={session.csrf_token} />}
     </>
   );

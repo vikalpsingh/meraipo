@@ -29,8 +29,10 @@ from apps.api.feedback_routes import router as feedback_router
 from apps.api.job_routes import router as job_router
 from apps.api.market_routes import router as market_router
 from apps.api.result_routes import router as result_router
+from apps.api.x_routes import router as x_router
 from packages.database import models as m
 from packages.database.session import engine, get_session
+from packages.providers.x_api import XError
 from packages.shared.calculations import financial_quarter, financial_year
 from packages.shared.config import settings
 from packages.shared.market_config import load_market_settings
@@ -56,6 +58,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(x_router, prefix="/api/v1")
 app.include_router(email_router, prefix="/api/v1")
 app.include_router(email_admin_router, prefix="/api/v1")
 app.include_router(email_analytics_router, prefix="/api/v1")
@@ -102,7 +105,7 @@ async def observe(request, call_next):
     except Exception:
         logger.error(
             json.dumps({"event": "request_failed", "request_id": request_id}),
-            exc_info="/ipo-alerts/" not in request.url.path,
+            exc_info="/ipo-alerts/" not in request.url.path and "/admin/x/" not in request.url.path,
         )
         response = JSONResponse(
             {
@@ -120,7 +123,7 @@ async def observe(request, call_next):
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer"
-            if "/ipo-alerts/" in request.url.path
+            if "/ipo-alerts/" in request.url.path or "/admin/x/" in request.url.path
             else "strict-origin-when-cross-origin",
             "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
             "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -755,3 +758,12 @@ async def audits(
             ).all()
         ]
     }
+
+
+@app.exception_handler(XError)
+async def x_error_handler(request: Request, exc):
+    return JSONResponse(
+        {"error": {"code": exc.code, "message": exc.code}},
+        status_code=409,
+        headers={"Cache-Control": "no-store"},
+    )

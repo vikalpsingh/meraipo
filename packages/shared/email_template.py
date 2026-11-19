@@ -231,6 +231,32 @@ async def content(
 <p style="font-size:13px;line-height:1.5;color:#47605b">{escape(disclaimer)}</p></td></tr>
 <tr><td bgcolor="#f2f6f4" style="padding:16px 24px;font-size:13px"><a style="color:#355a50" href="{escape(unsubscribe_url)}">Unsubscribe from IPO alerts</a></td></tr>
 </table></td></tr></table></body></html>"""
+    if opening:
+        from packages.shared.ipo_social_card import render
+
+        png = render(
+            company.name,
+            price,
+            premium
+            if same_day and not stale and price and price > 0 and price + premium >= 0
+            else None,
+            rendered_at.astimezone(IST).strftime("%d %b %Y %H:%M IST"),
+            dates.open_date if dates else "Unconfirmed",
+        )
+        src = (
+            "cid:ipo-price-chart"
+            if inline_attachment
+            else "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        )
+        card = f'<img src="{src}" width="600" height="315" alt="{escape(company.name)} opening-day IPO snapshot; GMP is unofficial" style="display:block;width:100%;height:auto">'
+        markup = (
+            markup.replace(chart, card)
+            if chart
+            else markup.replace(
+                '<h2 style="margin:0;font-size:18px">IPO snapshot</h2>',
+                card + '<h2 style="margin:0;font-size:18px">IPO snapshot</h2>',
+            )
+        )
     result = {"subject": subject, "text": text, "html": markup}
     if inline_attachment and png:
         result["chart_png"] = png

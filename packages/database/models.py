@@ -755,3 +755,36 @@ class EmailDispatchRun(Entity, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processed: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(80))
+
+
+class XAccount(Base):
+    __tablename__ = "x_accounts"
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="meraipo")
+    user_id: Mapped[str | None] = mapped_column(String(40))
+    username: Mapped[str | None] = mapped_column(String(40))
+    tokens: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auto_publish: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    schedules: Mapped[dict] = mapped_column(JSON, default=dict)
+
+class XPost(Entity, Base):
+    __tablename__ = "x_posts"
+    trading_date: Mapped[date] = mapped_column(Date)
+    dedupe_key: Mapped[str | None] = mapped_column(String(100), unique=True)
+    kind: Mapped[str] = mapped_column(String(24), default="IPO_BRIEF")
+    image_png: Mapped[bytes | None] = mapped_column(LargeBinary)
+    content: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="DRAFT")
+    approved_by: Mapped[str | None] = mapped_column(ForeignKey("admin_users.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    post_id: Mapped[str | None] = mapped_column(String(40), unique=True)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    api_status: Mapped[int | None] = mapped_column(Integer)
+    request_id: Mapped[str | None] = mapped_column(String(100))

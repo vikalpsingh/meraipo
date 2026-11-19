@@ -2696,3 +2696,11 @@ body:has(.company-preview[open]) {
 .tracker-coverage strong { font-size:14px; }
 .tracker-coverage p { margin:4px 0 0; }
 @media(max-width:380px) { .signup-broker-options { grid-template-columns:1fr; } }
+
+/* Admin X schedules: scoped controls retain public-page styling. */
+.x-publishing-panel > label { display:flex; align-items:center; gap:12px; padding:12px 0; }
+.x-publishing-panel input[type="checkbox"] { width:18px; height:18px; flex-shrink:0; accent-color:#12624b; }
+.x-publishing-panel input[type="time"] { min-height:44px; padding:8px 12px; border:1px solid #99afa7; border-radius:8px; background:#fff; color:#163d38; font:inherit; }
+.x-publishing-panel button { min-height:44px; margin:4px; }
+.x-publishing-panel :is(button,input,a):focus-visible { outline:3px solid #14836e; outline-offset:3px; }
+.x-publishing-panel dd { overflow-wrap:anywhere; max-width:50ch; }

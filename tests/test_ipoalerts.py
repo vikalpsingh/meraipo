@@ -463,3 +463,35 @@ async def test_http_rejection_diagnostics_persist_without_provider_secrets(db):
     assert "HTTP 422" in recorded.detail and "status=open" in recorded.detail
     assert "page=1" in recorded.detail and "limit=3" in recorded.detail
     assert "test-secret" not in recorded.detail and "private body" not in recorded.detail
+
+
+async def test_upcoming_mahanadi_on_later_page_is_not_missed():
+    """Synthetic regression for discovery outside the first/open-only page."""
+    calls = []
+
+    def handler(request):
+        assert request.headers["x-api-key"] == "fixture-key"
+        params = request.url.params
+        status, page = params["status"], int(params["page"])
+        calls.append((status, page))
+        assert "source" not in params and "type" not in params
+        items = []
+        if status == "upcoming":
+            item = row()
+            item.update(id=f"upcoming-{page}", status="upcoming",
+                        slug=f"upcoming-{page}", symbol=f"FIXTURE{page}",
+                        name="Mahanadi Coalfields Limited" if page == 2 else "Other Fixture Limited",
+                        startDate="2026-11-19", endDate="2026-11-23",
+                        listingDate="2026-11-27")
+            items = [item]
+        return httpx.Response(200, json=response(
+            items, page, 2 if status == "upcoming" else 1,
+            2 if status == "upcoming" else 0))
+
+    batches = [batch async for batch in IPOAlerts(
+        "fixture-key", page_size=10, transport=httpx.MockTransport(handler), sleep=no_sleep
+    ).batches(time.monotonic() + 60)]
+    issues = [value for batch in batches for kind, value in batch.records if kind == "ipos"]
+    assert ("upcoming", 2) in calls and ("announced", 1) in calls
+    matches = [item for item in issues if item["issue"]["name"] == "Mahanadi Coalfields Limited"]
+    assert len(matches) == 1 and matches[0]["issue"]["status"] == "UPCOMING"

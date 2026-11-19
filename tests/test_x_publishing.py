@@ -1,0 +1,381 @@
+"""No live X calls: approval, PKCE, identity, budgets, dates, and failure semantics."""
+
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from pydantic import SecretStr
+from sqlalchemy import select
+
+from packages.database import models as m
+from packages.providers import x_api
+from packages.shared import x_publishing as service
+from packages.shared.config import settings
+from packages.shared.market_config import decrypt_secret, encrypt_secret
+
+
+def test_schedule_ist_window_and_disabled():
+    now = datetime(2026, 11, 18, 8, 45, tzinfo=service.IST)
+    assert service.due({"enabled": True, "time": "08:45"}, now)
+    assert not service.due({"enabled": True, "time": "09:00"}, now)
+    assert not service.due({"enabled": False, "time": "08:45"}, now)
+    assert not service.due({"enabled": True, "time": "07:45"}, now)
+
+
+def test_market_research_rejects_missing_sources_dates_and_length():
+    import json
+
+    from packages.providers.market_research import validate_result
+
+    now = datetime(2026, 11, 18, 3, 15, tzinfo=timezone.utc)
+    url = "https://www.nseindia.com/market-data"
+    result = {
+        "ready": True,
+        "text": "Markets 18 Nov: prior close snapshot.",
+        "facts": [{"claim": "Prior close", "as_of": "2026-11-17T10:00:00Z", "url": url}],
+        "reason": "",
+    }
+    payload = {
+        "status": "completed",
+        "output": [
+            {"type": "web_search_call", "action": {"sources": [{"url": url}]}},
+            {"type": "message", "content": [{"type": "output_text", "text": json.dumps(result)}]},
+        ],
+    }
+    text, evidence = validate_result(payload, now)
+    assert url in text and evidence["review_required"]
+    for bad in ("2026-11-01T10:00:00Z", "2026-11-19T10:00:00Z", "2026-11-17T10:00:00"):
+        result["facts"][0]["as_of"] = bad
+        payload["output"][1]["content"][0]["text"] = json.dumps(result)
+        with pytest.raises(x_api.XError):
+            validate_result(payload, now)
+    result["facts"][0]["as_of"] = "2026-11-17T10:00:00Z"
+    result["facts"][0]["url"] = "https://unapproved.example/fake"
+    payload["output"][1]["content"][0]["text"] = json.dumps(result)
+    with pytest.raises(x_api.XError):
+        validate_result(payload, now)
+
+
+async def test_opening_image_dedup_and_disabled_publish(db, draft_setup, monkeypatch):
+    row, ipo, a = draft_setup
+    a.schedules = {"IPO_OPENING": {"enabled": True, "time": "08:45"}}
+    await db.commit()
+    rows = await service.generate_scheduled(db, "IPO_OPENING")
+    assert len(rows) == 1 and rows[0].status == "DRAFT"
+    post = rows[0]
+    assert post.image_png.startswith(b"\x89PNG")
+    more = await service.generate_scheduled(db, "IPO_OPENING")
+    assert all(candidate.id != post.id for candidate in more)
+    from packages.shared.email_template import content
+
+    mail = await content(
+        db,
+        ipo.id,
+        "https://www.meraipo.com",
+        "private-unsubscribe",
+        opening=True,
+        inline_attachment=True,
+    )
+    assert mail["chart_png"] == post.image_png
+    assert b"private-unsubscribe" not in post.image_png
+    post.status, post.approved_at = "APPROVED", m.now()
+    a.schedules = {"IPO_OPENING": {"enabled": False, "time": "08:45"}}
+    await db.commit()
+    with pytest.raises(x_api.XError, match="POST_TYPE_DISABLED"):
+        await service.publish(db, post.id)
+    a.schedules = {"IPO_OPENING": {"enabled": True, "time": "08:45"}}
+    await db.commit()
+    request = AsyncMock(side_effect=[{"data": {"id": "888"}}, {"data": {"id": "999"}}])
+    monkeypatch.setattr(x_api, "request", request)
+    await service.publish(db, post.id)
+    assert post.status == "PUBLISHED"
+    assert request.call_args_list[1].kwargs["json"]["media"]["media_ids"] == ["888"]
+
+
+async def test_research_reserved_once_and_never_auto_published(db, draft_setup, monkeypatch):
+    from packages.providers import market_research
+
+    _, _, a = draft_setup
+    a.schedules = {"MARKET_DAILY": {"enabled": True, "time": "08:45"}}
+    a.auto_publish = True
+    await db.commit()
+    research = AsyncMock(
+        return_value=(
+            "Markets: prior close.",
+            {"facts": [{"claim": "Prior close"}], "generated_at": m.now().isoformat()},
+        )
+    )
+    monkeypatch.setattr(market_research, "generate", research)
+    rows = await service.generate_scheduled(db, "MARKET_DAILY")
+    assert rows[0].status == "DRAFT"
+    assert not await service.generate_scheduled(db, "MARKET_DAILY")
+    assert research.await_count == 1
+    rows[0].status = "QUEUED"
+    await db.commit()
+    with pytest.raises(x_api.XError, match="APPROVAL_REQUIRED"):
+        await service.publish(db, rows[0].id)
+
+
+async def test_schedule_admin_validation_and_market_auto_gate(admin_client, db, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lock():
+        yield
+
+    monkeypatch.setattr(service, "operation_lock", lock)
+    r = await admin_client.post(
+        "/api/v1/admin/x/schedule", json={"kind": "IPO_OPENING", "enabled": True, "time": "25:00"}
+    )
+    assert r.status_code == 422
+    r = await admin_client.post(
+        "/api/v1/admin/x/schedule", json={"kind": "IPO_OPENING", "enabled": True, "time": "09:15"}
+    )
+    assert r.status_code == 200
+    state = (await admin_client.get("/api/v1/admin/x")).json()
+    assert state["schedules"]["IPO_OPENING"] == {"enabled": True, "time": "09:15"}
+    assert not state["schedules"]["MARKET_DAILY"]["enabled"]
+    assert "tokens" not in state and "openai_api_key" not in state
+    r = await admin_client.post("/api/v1/admin/x/market-auto", json={"enabled": True})
+    assert r.status_code == 409
+
+
+def test_x_schedule_migration_roundtrip():
+    import importlib
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    initial = importlib.import_module("packages.database.migrations.versions.20261117_x_publishing")
+    migration = importlib.import_module(
+        "packages.database.migrations.versions.20261118_x_schedules"
+    )
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE admin_users (id VARCHAR(36) PRIMARY KEY)"))
+        with Operations.context(MigrationContext.configure(conn)):
+            initial.upgrade()
+            migration.upgrade()
+            assert {c["name"] for c in sa.inspect(conn).get_columns("x_posts")} >= {
+                "kind",
+                "dedupe_key",
+                "image_png",
+            }
+            assert not any(
+                c["column_names"] == ["trading_date"]
+                for c in sa.inspect(conn).get_unique_constraints("x_posts")
+            )
+            migration.downgrade()
+            assert any(
+                c["column_names"] == ["trading_date"]
+                for c in sa.inspect(conn).get_unique_constraints("x_posts")
+            )
+            initial.downgrade()
+    engine.dispose()
+
+
+def test_length_and_calendar():
+    assert service.weighted_length("https://x.co") == 23
+    assert service.weighted_length("₹") == 2
+    config = SimpleNamespace(trading_calendar_year=2026, trading_holidays="2026-11-17")
+    assert not service.trading_day(config, datetime(2026, 11, 17).date())
+    assert not service.trading_day(config, datetime(2026, 11, 15).date())
+    assert service.trading_day(config, datetime(2026, 11, 18).date())
+    with pytest.raises(x_api.XError):
+        service.trading_day(config, datetime(2027, 1, 1).date())
+
+
+@pytest.fixture
+async def draft_setup(db, monkeypatch):
+    now = datetime(2026, 11, 17, 3, 15, tzinfo=timezone.utc)
+    monkeypatch.setattr(m, "now", lambda: now)
+    c = settings()
+    for k, v in dict(
+        x_enabled=True,
+        trading_calendar_year=2026,
+        trading_holidays="",
+        x_daily_attempt_limit=1,
+        x_monthly_post_limit=20,
+    ).items():
+        monkeypatch.setattr(c, k, v)
+    ipo = await db.scalar(select(m.IPO))
+    company = await db.get(m.Company, ipo.company_id)
+    company.is_demo = False
+    ipo.status = "OPEN"
+    ipo.raw_status = None
+    ipo.source_timestamp = now - timedelta(hours=1)
+    dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
+    dates.open_date = now.date()
+    dates.close_date = now.date() + timedelta(days=2)
+    guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
+    guide.verification_status = "VERIFIED"
+    guide.schedule_status = "CONFIRMED"
+    guide.reviewed_on = now.date()
+    guide.source_url = "https://www.nseindia.com/ipo"
+    await db.commit()
+    row = await service.generate(db)
+    a = await service.account(db)
+    a.user_id = "123"
+    a.tokens = encrypt_secret("{}")
+    await db.commit()
+    monkeypatch.setattr(x_api, "access_token", AsyncMock(return_value="private"))
+    monkeypatch.setattr(
+        x_api, "identity", AsyncMock(return_value={"id": "123", "username": "MeraIPO"})
+    )
+    return row, ipo, a
+
+
+async def test_approval_required_and_duplicate_publish(db, draft_setup, monkeypatch):
+    row, ipo, a = draft_setup
+    send = AsyncMock(return_value={"data": {"id": "987"}})
+    monkeypatch.setattr(x_api, "request", send)
+    assert row.status == "DRAFT" and service.weighted_length(row.content) <= 280
+    with pytest.raises(x_api.XError, match="APPROVAL_REQUIRED"):
+        await service.publish(db, row.id)
+    assert not send.called
+    row.status = "APPROVED"
+    row.approved_at = m.now()
+    await db.commit()
+    await service.publish(db, row.id)
+    assert row.status == "PUBLISHED" and row.post_id == "987"
+    with pytest.raises(x_api.XError):
+        await service.publish(db, row.id)
+    assert send.await_count == 1
+
+
+async def test_ambiguous_send_is_not_retried(db, draft_setup, monkeypatch):
+    row, _, _ = draft_setup
+    row.status = "APPROVED"
+    row.approved_at = m.now()
+    await db.commit()
+    monkeypatch.setattr(
+        x_api, "request", AsyncMock(side_effect=x_api.XError("NETWORK_OUTCOME_UNKNOWN"))
+    )
+    await service.publish(db, row.id)
+    assert row.status == "UNCERTAIN" and row.attempts == 1
+    with pytest.raises(x_api.XError):
+        await service.publish(db, row.id)
+
+
+async def test_stale_data_and_budget_block_before_api(db, draft_setup, monkeypatch):
+    row, ipo, _ = draft_setup
+    row.status = "APPROVED"
+    row.approved_at = m.now()
+    ipo.source_timestamp = m.now() - timedelta(days=10)
+    await db.commit()
+    with pytest.raises(x_api.XError, match="NO_FRESH"):
+        await service.publish(db, row.id)
+    ipo.source_timestamp = m.now()
+    row.attempts = 1
+    await db.commit()
+    with pytest.raises(x_api.XError, match="DAILY_ATTEMPT_LIMIT"):
+        await service.publish(db, row.id)
+
+
+async def test_wrong_account_rejected(monkeypatch):
+    monkeypatch.setattr(
+        x_api, "request", AsyncMock(return_value={"data": {"id": "123", "username": "Wrong"}})
+    )
+    with pytest.raises(x_api.XError, match="WRONG_X_ACCOUNT"):
+        await x_api.identity("secret")
+
+
+async def test_refresh_persists_rotated_tokens(db, monkeypatch):
+    a = await service.account(db)
+    a.tokens = encrypt_secret('{"access_token":"old","refresh_token":"old-refresh"}')
+    a.expires_at = m.now() - timedelta(minutes=1)
+    await db.commit()
+    monkeypatch.setattr(
+        x_api,
+        "exchange",
+        AsyncMock(
+            return_value={
+                "access_token": "new",
+                "refresh_token": "new-refresh",
+                "scope": x_api.SCOPES,
+                "expires_in": 7200,
+            }
+        ),
+    )
+    assert await x_api.access_token(db, a) == "new"
+    assert "new-refresh" in decrypt_secret(a.tokens)
+    assert "new-refresh" not in a.tokens
+
+
+async def test_admin_only_and_csrf(client, admin_client):
+    # admin_client fixture signs in the same client; remove cookie for public check.
+    cookies = dict(client.cookies)
+    client.cookies.clear()
+    assert (await client.get("/api/v1/admin/x")).status_code == 401
+    client.cookies.update(cookies)
+    headers = dict(client.headers)
+    client.headers.pop("x-csrf-token", None)
+    assert (await client.post("/api/v1/admin/x/draft")).status_code == 403
+    client.headers.update(headers)
+
+
+async def test_pkce_bound_single_use_flow(db, monkeypatch):
+    import base64
+    import hashlib
+    import json
+    from urllib.parse import parse_qs, urlsplit
+
+    from fastapi import HTTPException
+
+    from apps.api import x_routes
+
+    config = settings()
+    monkeypatch.setattr(config, "x_enabled", True)
+    monkeypatch.setattr(config, "x_client_id", "client")
+    monkeypatch.setattr(config, "x_client_secret", SecretStr("client-secret"))
+    monkeypatch.setattr(
+        config, "config_encryption_key", SecretStr("test-config-encryption-key-at-least-32")
+    )
+    monkeypatch.setattr(config, "public_origin", "https://www.meraipo.com")
+    monkeypatch.setattr(config, "x_redirect_uri", "https://www.meraipo.com/api/v1/admin/x/callback")
+    store = {}
+
+    async def put(key, value, **kwargs):
+        store[key] = value
+
+    async def take(key):
+        return store.pop(key, None)
+
+    monkeypatch.setattr(x_routes.client, "set", put)
+    monkeypatch.setattr(x_routes.client, "getdel", take)
+    auth = (SimpleNamespace(id=None), SimpleNamespace(id="session1"))
+    result = await x_routes.connect(auth, db)
+    params = parse_qs(urlsplit(result["url"]).query)
+    assert params["code_challenge_method"] == ["S256"]
+    flow = json.loads(decrypt_secret(store["x:oauth:session1"]))
+    assert params["code_challenge"] == [
+        base64.urlsafe_b64encode(hashlib.sha256(flow["verifier"].encode()).digest())
+        .decode()
+        .rstrip("=")
+    ]
+    assert flow["verifier"] not in result["url"]
+    with pytest.raises(HTTPException):
+        await x_routes.callback(state="wrong", code="private-code", error="", auth=auth, db=db)
+    assert not store
+    with pytest.raises(HTTPException):
+        await x_routes.callback(
+            state=flow["state"], code="private-code", error="", auth=auth, db=db
+        )
+
+
+async def test_auto_requires_success(db, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from fastapi import HTTPException
+
+    @asynccontextmanager
+    async def unlocked():
+        yield
+
+    monkeypatch.setattr(service, "operation_lock", unlocked)
+    from apps.api.x_routes import AutoInput, auto
+
+    with pytest.raises(HTTPException):
+        await auto(AutoInput(enabled=True), (SimpleNamespace(id=None),), db)
