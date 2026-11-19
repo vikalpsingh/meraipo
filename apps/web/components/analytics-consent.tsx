@@ -1,7 +1,7 @@
 'use client';
 import Script from 'next/script';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 type AnalyticsWindow = Window & {
   dataLayer?: unknown[];
   gtag?: (...args: unknown[]) => void;
@@ -10,6 +10,8 @@ export function AnalyticsConsent({ measurementId }: { measurementId: string }) {
   const pathname = usePathname();
   const [consent, setConsent] = useState('');
   const [ready, setReady] = useState(false);
+  const configuredId = useRef<string | null>(null);
+  const lastPage = useRef<string | null>(null);
   const excluded = pathname.startsWith('/meraadmin') || pathname.startsWith('/email-alerts/');
   const configured = /^G-[A-Z0-9]+$/.test(measurementId);
   useEffect(() => {
@@ -25,7 +27,10 @@ export function AnalyticsConsent({ measurementId }: { measurementId: string }) {
     if (!configured) return;
     const w = window as unknown as AnalyticsWindow;
     w[`ga-disable-${measurementId}`] = consent !== 'granted' || excluded;
-    if (!ready || consent !== 'granted' || excluded) return;
+    if (!ready || consent !== 'granted' || excluded) {
+      lastPage.current = null;
+      return;
+    }
     const location = new URL(window.location.origin + pathname);
     const source = new URLSearchParams(window.location.search);
     // Only fixed attribution values and the actual public IPO slug may reach Google.
@@ -43,19 +48,28 @@ export function AnalyticsConsent({ measurementId }: { measurementId: string }) {
     }
     // Use the page's public title, omitting any user-entered query or fragment.
     const title = document.title.split('?')[0].split('#')[0] || 'MeraIPO';
-    w.gtag?.('config', measurementId, {
-      send_page_view: false,
-      allow_google_signals: false,
-      allow_ad_personalization_signals: false,
+    const page = {
       page_location: location.toString(),
       page_referrer: '',
       page_title: title,
-    });
-    w.gtag?.('event', 'page_view', {
-      page_location: location.toString(),
-      page_referrer: '',
-      page_title: title,
-    });
+    };
+    if (!w.gtag) return;
+    if (configuredId.current !== measurementId) {
+      w.gtag('config', measurementId, {
+        send_page_view: false,
+        allow_google_signals: false,
+        allow_ad_personalization_signals: false,
+        ...page,
+      });
+      configuredId.current = measurementId;
+    } else {
+      w.gtag('set', page);
+    }
+    // A single pageview per route transition, including React effect replays.
+    const key = measurementId + ':' + location.toString();
+    if (lastPage.current === key) return;
+    lastPage.current = key;
+    w.gtag('event', 'page_view', { ...page, send_to: measurementId });
   }, [pathname, consent, ready, excluded, configured, measurementId]);
   function choose(value: string) {
     const w = window as unknown as AnalyticsWindow;
