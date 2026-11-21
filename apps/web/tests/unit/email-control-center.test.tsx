@@ -29,7 +29,7 @@ const companies = [{ id: 'company', ipo_id: 'ipo', name: 'Fixture IPO' } as Comp
 it('shows unavailable setup and prevents activating production', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => status }));
   render(<EmailControlCenter csrf="token" companies={companies} />);
-  fireEvent.click(screen.getByText('Advanced tests, production settings and delivery reports'));
+  fireEvent.click(screen.getByText('Inbox readiness and category tests'));
   expect(await screen.findByRole('switch')).toBeDisabled();
   expect(screen.getByText(/NOT CONFIGURED/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Send one TEST to my admin email' })).toBeDisabled();
@@ -50,7 +50,7 @@ it('requires preview before an explicit test request and passes CSRF', async () 
     .mockResolvedValue({ ok: true, json: async () => status });
   vi.stubGlobal('fetch', fetcher);
   render(<EmailControlCenter csrf="token" companies={companies} />);
-  fireEvent.click(screen.getByText('Advanced tests, production settings and delivery reports'));
+  fireEvent.click(screen.getByText('Inbox readiness and category tests'));
   await screen.findByRole('switch');
   fireEvent.change(screen.getByLabelText('IPO'), { target: { value: 'ipo' } });
   fireEvent.click(screen.getByRole('button', { name: 'Preview HTML and text' }));
@@ -73,7 +73,7 @@ it('queues one sample from the recipient field with advanced settings closed', a
   vi.stubGlobal('fetch', fetcher);
   render(<EmailControlCenter csrf="token" companies={companies} />);
   expect(
-    screen.getByText('Advanced tests, production settings and delivery reports').closest('details'),
+    screen.getByText('Inbox readiness and category tests').closest('details'),
   ).not.toHaveAttribute('open');
   fireEvent.change(screen.getByLabelText('Recipient email address'), {
     target: { value: 'tester@example.com' },
@@ -86,4 +86,37 @@ it('queues one sample from the recipient field with advanced settings closed', a
       body: JSON.stringify({ ipo_id: 'ipo', email: 'tester@example.com', categories: ['white'] }),
     }),
   );
+});
+
+it('links the paused production section to recipient testing and explains SES blockers', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ...status,
+        readiness: {
+          ...status.readiness,
+          checks: { test_received: false, unsubscribe_verified: false },
+          aws: { ...status.readiness.aws, checks: { ses_events: false, sns_subscription: true } },
+        },
+      }),
+    }),
+  );
+  render(<EmailControlCenter csrf="token" companies={companies} />);
+  fireEvent.click(screen.getByText('Inbox readiness and category tests'));
+  expect(
+    await screen.findByRole('note', { name: 'Why subscriber emails are paused' }),
+  ).toHaveTextContent('Delivery, Bounce');
+  for (const link of screen.getAllByRole('link', {
+    name: /Send a test email to a specific recipient/,
+  })) {
+    expect(link).toHaveAttribute('href', '#email-recipient-test');
+  }
+  expect(screen.getByRole('form', { name: 'Send a sample email' })).toHaveAttribute(
+    'id',
+    'email-recipient-test',
+  );
+  expect(screen.getByRole('switch')).toBeDisabled();
+  expect(screen.getByLabelText('Recipient email address')).toBeEnabled();
 });
