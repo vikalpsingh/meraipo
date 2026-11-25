@@ -200,3 +200,16 @@ No migration is needed: schedules are JSON and post kinds are strings. Deploy AP
 worker, scheduler and web together. Enable/save both schedules and then enable the
 global automatic-publishing toggle. Disable either schedule or the global toggle to
 stop future automatic publishing. Existing published/uncertain posts are not retried.
+
+## OpenAI connection test
+The admin-only OpenAI connection section issues a fixed, short integration-test prompt
+through the configured Responses model, without web search or market claims. It uses
+at most 500 output tokens and one request per five minutes across administrators
+(Redis reservation before the request; failed requests retain the cooldown).
+A successful response displays text, model and elapsed milliseconds. It does not
+prove live market research has adequate sources and does not consume its daily slot.
+After explicitly confirming review, Publish reviewed GPT response to X saves a MANUAL
+draft, approves it, and queues it through the existing publisher. Failed intermediate
+steps stop the sequence. Duplicate, length, identity and spending checks still apply.
+This test does not unlock the successful MARKET_DAILY approval requirement. Never
+paste credentials into test text; credentials remain exclusively on the server.

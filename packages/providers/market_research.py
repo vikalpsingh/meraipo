@@ -137,3 +137,46 @@ async def generate(now):
         return validate_result(response.json(), now)
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         raise XError("OPENAI_REQUEST_UNCERTAIN_NO_AUTO_RETRY") from exc
+
+
+async def connection_test():
+    """Small paid connectivity check, deliberately without market claims or web search."""
+    import time
+
+    c = settings()
+    if not c.openai_api_key.get_secret_value():
+        raise XError("OPENAI_NOT_CONFIGURED")
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": "Bearer " + c.openai_api_key.get_secret_value()},
+                json={
+                    "model": c.openai_market_model,
+                    "store": False,
+                    "max_output_tokens": 500,
+                    "input": "Write one short plain-text message under 180 characters announcing a MeraIPO integration test. Explicitly say this is a test, not a market update. Include no market figures, investment advice, URLs or hashtags.",
+                },
+            )
+        if response.status_code != 200:
+            raise XError("OPENAI_HTTP_" + str(response.status_code), response.status_code)
+        payload = response.json()
+        if payload.get("status") != "completed":
+            raise XError("OPENAI_TEST_INCOMPLETE")
+        text = "".join(
+            p.get("text", "")
+            for item in payload.get("output", [])
+            if item.get("type") == "message"
+            for p in item.get("content", [])
+            if p.get("type") == "output_text"
+        ).strip()
+        if not text or len(text) > 2000:
+            raise XError("OPENAI_TEST_INVALID_RESPONSE")
+        return {
+            "text": text,
+            "model": c.openai_market_model,
+            "elapsed_ms": round((time.monotonic() - started) * 1000),
+        }
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise XError("OPENAI_TEST_UNCERTAIN_NO_AUTO_RETRY") from exc

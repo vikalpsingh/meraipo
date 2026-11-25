@@ -101,3 +101,44 @@ it('previews manual text and saves only a draft with CSRF', async () => {
     screen.getByRole('button', { name: "Get today's market-opening draft · OpenAI" }),
   ).toBeDisabled();
 });
+
+it('requires response review before queuing GPT text to X', async () => {
+  const fetcher = vi.fn().mockImplementation(async (url, options) => ({
+    ok: true,
+    json: async () =>
+      options?.method !== 'POST'
+        ? { ...overview, openai_configured: true }
+        : url.endsWith('/openai-test')
+          ? { openai_test: { text: 'Integration test only.', model: 'test-model', elapsed_ms: 12 } }
+          : url.endsWith('/manual-draft')
+            ? { id: 'manual-test', message: 'Saved' }
+            : { message: 'Queued' },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Test OpenAI connection' }));
+  expect(await screen.findByText('Integration test only.')).toBeInTheDocument();
+  const publish = screen.getByRole('button', { name: 'Publish reviewed GPT response to X' });
+  expect(publish).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('checkbox', {
+      name: 'I reviewed this response and want to publish it publicly to @MeraIPO.',
+    }),
+  );
+  fireEvent.click(publish);
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/v1/admin/x/manual-test/publish',
+      expect.objectContaining({ method: 'POST' }),
+    ),
+  );
+  const calls = fetcher.mock.calls
+    .filter(([, options]) => options?.method === 'POST')
+    .map(([url]) => url);
+  expect(calls).toEqual([
+    '/api/v1/admin/x/openai-test',
+    '/api/v1/admin/x/manual-draft',
+    '/api/v1/admin/x/manual-test/approve',
+    '/api/v1/admin/x/manual-test/publish',
+  ]);
+});

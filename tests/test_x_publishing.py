@@ -514,3 +514,66 @@ async def test_ipo_blocked_feed_refresh_recovery(db, draft_setup):
     await db.commit()
     with pytest.raises(x_api.XError, match="IPO_PUBLIC_SOURCE_NOT_READY"):
         await service.validate_post(db, recovered)
+
+
+async def test_openai_connection_control_and_cooldown(admin_client, monkeypatch):
+    from apps.api import x_routes
+    from packages.providers import market_research
+
+    monkeypatch.setattr(settings(), "openai_api_key", SecretStr("test-private"))
+    limiter = AsyncMock(side_effect=[True, False])
+    monkeypatch.setattr(x_routes.client, "set", limiter)
+    generate = AsyncMock(
+        return_value={
+            "text": "MeraIPO integration test, not a market update.",
+            "model": "test-model",
+            "elapsed_ms": 20,
+        }
+    )
+    monkeypatch.setattr(market_research, "connection_test", generate)
+    result = await admin_client.post("/api/v1/admin/x/openai-test")
+    assert result.status_code == 200
+    assert result.json()["openai_test"]["text"].startswith("MeraIPO")
+    assert "test-private" not in result.text
+    assert (await admin_client.post("/api/v1/admin/x/openai-test")).status_code == 429
+    assert generate.await_count == 1
+    assert limiter.call_args.kwargs == {"nx": True, "ex": 300}
+
+
+async def test_openai_connection_provider_no_research(monkeypatch):
+    import httpx
+
+    from packages.providers import market_research
+
+    monkeypatch.setattr(settings(), "openai_api_key", SecretStr("test-private"))
+    response = httpx.Response(
+        200,
+        json={
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "Integration test."}],
+                }
+            ],
+        },
+    )
+    post = AsyncMock(return_value=response)
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    client = Client()
+    client.post = post
+    monkeypatch.setattr(market_research.httpx, "AsyncClient", lambda **kwargs: client)
+    result = await market_research.connection_test()
+    assert result["text"] == "Integration test."
+    body = post.call_args.kwargs["json"]
+    assert "tools" not in body and body["store"] is False
+    post.return_value = httpx.Response(401)
+    with pytest.raises(x_api.XError, match="OPENAI_HTTP_401"):
+        await market_research.connection_test()

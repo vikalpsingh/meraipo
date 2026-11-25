@@ -34,6 +34,13 @@ type Overview = {
 };
 export function XControlCenter({ csrf }: { csrf: string }) {
   const [manualText, setManualText] = useState('');
+  const [openaiTest, setOpenaiTest] = useState<{
+    text: string;
+    model: string;
+    elapsed_ms: number;
+  } | null>(null);
+  const [testReviewed, setTestReviewed] = useState(false);
+  const [publishingTest, setPublishingTest] = useState(false);
   const [review, setReview] = useState<{
     kind: Kind;
     items: {
@@ -78,16 +85,35 @@ export function XControlCenter({ csrf }: { csrf: string }) {
       const result = await r.json();
       if (!r.ok) throw new Error(result.error?.message || result.detail || 'X action failed.');
       if (result.review) setReview(result.review);
+      if (result.openai_test) {
+        setOpenaiTest(result.openai_test);
+        setTestReviewed(false);
+      }
       if (path === 'connect' && result.url) {
         window.location.assign(result.url);
         return;
       }
       setMessage(result.message || 'Saved.');
       await load();
+      return result;
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Request failed.');
     } finally {
       setBusy(false);
+    }
+  }
+  async function publishTest() {
+    if (!openaiTest || !testReviewed || publishingTest) return;
+    setPublishingTest(true);
+    try {
+      const draft = await action('manual-draft', { content: openaiTest.text });
+      if (!draft?.id) return;
+      const approved = await action(draft.id + '/approve');
+      if (!approved) return;
+      const queued = await action(draft.id + '/publish');
+      if (queued) setTestReviewed(false);
+    } finally {
+      setPublishingTest(false);
     }
   }
   return (
@@ -147,6 +173,54 @@ export function XControlCenter({ csrf }: { csrf: string }) {
               </tbody>
             </table>
           </div>
+          <section className="panel" aria-label="OpenAI connection test">
+            <h3>Test OpenAI connection and GPT response</h3>
+            <p>
+              Generate a short integration-test message using the server API. This is a small paid
+              request, limited to once every five minutes. It does not use web search, verify live
+              market research, or consume the daily market-research allowance.
+            </p>
+            <button
+              disabled={busy || publishingTest || !data.openai_configured}
+              onClick={() => {
+                setOpenaiTest(null);
+                setTestReviewed(false);
+                void action('openai-test');
+              }}
+            >
+              Test OpenAI connection
+            </button>
+            {openaiTest && (
+              <>
+                <p>
+                  Connected · {openaiTest.model} · {openaiTest.elapsed_ms} ms
+                </p>
+                <h4>GPT response · not yet published</h4>
+                <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {openaiTest.text}
+                </p>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={testReviewed}
+                    disabled={busy || publishingTest}
+                    onChange={(event) => setTestReviewed(event.target.checked)}
+                  />{' '}
+                  I reviewed this response and want to publish it publicly to @MeraIPO.
+                </label>
+                <button
+                  disabled={busy || publishingTest || !data.connected || !testReviewed}
+                  onClick={() => void publishTest()}
+                >
+                  Publish reviewed GPT response to X
+                </button>
+                <p>
+                  This creates an approved manual test post. It does not unlock automated market
+                  research. Track the queued post in the table below.
+                </p>
+              </>
+            )}
+          </section>
           <section className="panel" aria-label="Manual X test post">
             <h3>Write a test post for @MeraIPO</h3>
             <p>

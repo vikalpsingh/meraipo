@@ -247,6 +247,26 @@ class ManualDraftInput(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
+@router.post("/openai-test")
+async def openai_test(auth=Depends(admin), db=Depends(get_session)):
+    from packages.providers.market_research import connection_test
+
+    if not settings().openai_api_key.get_secret_value():
+        raise HTTPException(409, "OPENAI_NOT_CONFIGURED")
+    if not await client.set("x:openai:connection-test", "reserved", nx=True, ex=300):
+        raise HTTPException(429, "Wait five minutes between OpenAI connection tests.")
+    audit(db, auth, "openai_test_requested")
+    await db.commit()
+    try:
+        result = await connection_test()
+    except x_api.XError as exc:
+        raise HTTPException(409, exc.code) from None
+    return {
+        "message": "OpenAI responded. Review the test text before publishing; no X post has been sent.",
+        "openai_test": result,
+    }
+
+
 @router.post("/manual-draft")
 async def manual_draft(data: ManualDraftInput, auth=Depends(admin), db=Depends(get_session)):
     import hashlib
@@ -262,7 +282,8 @@ async def manual_draft(data: ManualDraftInput, auth=Depends(admin), db=Depends(g
         existing = await db.scalar(select(m.XPost).where(m.XPost.dedupe_key == key))
         if existing:
             return {
-                "message": "This text already exists in today's ledger. Review that post; no duplicate was created."
+                "id": existing.id,
+                "message": "This text already exists in today's ledger. Review that post; no duplicate was created.",
             }
         row = m.XPost(
             kind="MANUAL",
@@ -278,7 +299,8 @@ async def manual_draft(data: ManualDraftInput, auth=Depends(admin), db=Depends(g
         audit(db, auth, "manual_draft_created", row.id)
         await db.commit()
     return {
-        "message": "Manual draft saved. Review it below, Approve, then Publish now to send a real public post to @MeraIPO."
+        "id": row.id,
+        "message": "Manual draft saved. Review it below, Approve, then Publish now to send a real public post to @MeraIPO.",
     }
 
 
