@@ -423,7 +423,8 @@ async def test_review_includes_ipo_with_unverified_guide(db, draft_setup):
     await db.commit()
     result = await review_sources(GenerateInput(kind="IPO_OPENING"), auth=None, db=db)
     assert result["review"]["items"]
-    assert result["review"]["items"][0]["checks"]["Guide verified"] is False
+    assert "Guide verified" not in result["review"]["items"][0]["checks"]
+    assert result["review"]["items"][0]["checks"]["Public feed source"] is True
 
 
 async def test_manual_generation_requires_review_even_with_auto(db, draft_setup):
@@ -433,3 +434,83 @@ async def test_manual_generation_requires_review_even_with_auto(db, draft_setup)
     await db.commit()
     rows = await service.generate_scheduled(db, "IPO_OPENING", manual=True)
     assert rows[0].status == "DRAFT"
+
+
+async def test_manual_draft_dedup_validation_and_approval(admin_client, db, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from apps.api import x_routes
+
+    @asynccontextmanager
+    async def lock():
+        yield
+
+    monkeypatch.setattr(service, "operation_lock", lock)
+    monkeypatch.setattr(x_routes, "configured", lambda: settings())
+    for text in ("   ", "a" * 281):
+        response = await admin_client.post("/api/v1/admin/x/manual-draft", json={"content": text})
+        assert response.status_code == 422
+    for _ in range(2):
+        response = await admin_client.post(
+            "/api/v1/admin/x/manual-draft", json={"content": "MeraIPO connection test."}
+        )
+        assert response.status_code == 200
+    rows = (await db.scalars(select(m.XPost).where(m.XPost.kind == "MANUAL"))).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.status == "DRAFT" and row.attempts == 0 and row.approved_at is None
+    assert (await admin_client.post(f"/api/v1/admin/x/{row.id}/publish")).status_code == 409
+    monkeypatch.setattr(
+        service,
+        "snapshot",
+        AsyncMock(side_effect=AssertionError("manual text must not query IPO content")),
+    )
+    assert (await admin_client.post(f"/api/v1/admin/x/{row.id}/approve")).status_code == 200
+    assert (await admin_client.post(f"/api/v1/admin/x/{row.id}/publish")).status_code == 200
+    await db.refresh(row)
+    assert row.status == "QUEUED"
+
+
+async def test_public_feed_opening_closing_without_manual_guide(db, draft_setup):
+    row, ipo, a = draft_setup
+    guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
+    await db.delete(guide)
+    ipo.source_provider = "IPOALERTS"
+    dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
+    dates.close_date = dates.open_date
+    a.auto_publish = True
+    a.schedules = {
+        kind: {"enabled": True, "time": "08:45"} for kind in ("IPO_OPENING", "IPO_CLOSING")
+    }
+    await db.commit()
+    opening = (await service.generate_scheduled(db, "IPO_OPENING"))[0]
+    closing = (await service.generate_scheduled(db, "IPO_CLOSING"))[0]
+    assert opening.status == closing.status == "QUEUED"
+    assert "opens today" in opening.content and "closes today" in closing.content
+    assert opening.dedupe_key != closing.dedupe_key
+    assert closing.image_png and opening.image_png != closing.image_png
+    await service.validate_post(db, closing)
+    assert not await service.generate_scheduled(db, "IPO_CLOSING")
+    ipo.source_timestamp = m.now() - timedelta(days=3)
+    await db.commit()
+    with pytest.raises(x_api.XError, match="IPO_PUBLIC_SOURCE_NOT_READY"):
+        await service.validate_post(db, closing)
+
+
+async def test_ipo_blocked_feed_refresh_recovery(db, draft_setup):
+    row, ipo, a = draft_setup
+    a.auto_publish = True
+    a.schedules = {"IPO_OPENING": {"enabled": True, "time": "08:45"}}
+    ipo.source_timestamp = m.now() - timedelta(days=3)
+    await db.commit()
+    blocked = (await service.generate_scheduled(db, "IPO_OPENING"))[0]
+    assert blocked.status == "BLOCKED"
+    assert not await service.generate_scheduled(db, "IPO_OPENING")
+    ipo.source_timestamp = m.now()
+    await db.commit()
+    recovered = (await service.generate_scheduled(db, "IPO_OPENING"))[0]
+    assert recovered.id == blocked.id and recovered.status == "QUEUED"
+    ipo.quality = "CONFLICT"
+    await db.commit()
+    with pytest.raises(x_api.XError, match="IPO_PUBLIC_SOURCE_NOT_READY"):
+        await service.validate_post(db, recovered)

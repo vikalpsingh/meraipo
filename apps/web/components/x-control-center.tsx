@@ -19,7 +19,7 @@ type Post = {
   request_id: string | null;
 };
 type Schedule = { enabled: boolean; time: string; auto_publish?: boolean };
-type Kind = 'MARKET_DAILY' | 'IPO_OPENING';
+type Kind = 'MARKET_DAILY' | 'IPO_OPENING' | 'IPO_CLOSING';
 type Overview = {
   schedules: Record<Kind, Schedule>;
   openai_configured: boolean;
@@ -33,6 +33,7 @@ type Overview = {
   posts: Post[];
 };
 export function XControlCenter({ csrf }: { csrf: string }) {
+  const [manualText, setManualText] = useState('');
   const [review, setReview] = useState<{
     kind: Kind;
     items: {
@@ -93,8 +94,9 @@ export function XControlCenter({ csrf }: { csrf: string }) {
     <section className="panel x-publishing-panel">
       <h2>X publishing · @MeraIPO</h2>
       <p>
-        Trading-day market research and opening-day IPO posts. Times are India time (IST). Both
-        types start with approval; automatic publishing can be enabled after successful testing.
+        Trading-day market research and opening-day IPO posts. Times are India time (IST). IPO
+        reminders can publish automatically from public-feed data. Market research requires an
+        approved test first.
       </p>
       <p role="status">{message}</p>
       <button disabled={busy} onClick={() => void load().catch((e) => setMessage(e.message))}>
@@ -133,11 +135,11 @@ export function XControlCenter({ csrf }: { csrf: string }) {
                 </tr>
               </thead>
               <tbody>
-                {(['MARKET_DAILY', 'IPO_OPENING'] as Kind[]).map((kind) => (
+                {(['MARKET_DAILY', 'IPO_OPENING', 'IPO_CLOSING'] as Kind[]).map((kind) => (
                   <ScheduleRow
                     key={kind + JSON.stringify(data.schedules[kind])}
                     kind={kind}
-                    value={data.schedules[kind]}
+                    value={data.schedules[kind] || { enabled: false, time: '09:15' }}
                     busy={busy}
                     save={action}
                   />
@@ -145,6 +147,44 @@ export function XControlCenter({ csrf }: { csrf: string }) {
               </tbody>
             </table>
           </div>
+          <section className="panel" aria-label="Manual X test post">
+            <h3>Write a test post for @MeraIPO</h3>
+            <p>
+              This is a real public X post, not a sandbox message. Review any market claims
+              yourself. Saving creates a draft only; use Approve and Publish now below to send it.
+            </p>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void action('manual-draft', { content: manualText });
+              }}
+            >
+              <label htmlFor="x-manual-content">Message to publish</label>
+              <textarea
+                id="x-manual-content"
+                value={manualText}
+                onChange={(event) => setManualText(event.target.value)}
+                rows={5}
+                maxLength={4000}
+                required
+                style={{ width: '100%', padding: 12, marginBlock: 12 }}
+                placeholder="Paste or write the exact message you want to post…"
+              />
+              <p>
+                X allows 280 weighted characters; links and emoji count differently. The server
+                validates your draft.
+              </p>
+              <button type="submit" disabled={busy || !data.connected || !manualText.trim()}>
+                Save manual draft for review
+              </button>
+            </form>
+            {manualText.trim() && (
+              <div>
+                <h4>Preview · not yet published</h4>
+                <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{manualText}</p>
+              </div>
+            )}
+          </section>
           <p>
             Research starts at the scheduled time, not an exact publication deadline. One market
             research request per day; incomplete or interrupted research is not automatically
@@ -153,8 +193,12 @@ export function XControlCenter({ csrf }: { csrf: string }) {
           {review && (
             <section aria-label="Pulled content for review" className="panel">
               <h3>
-                {review.kind === 'MARKET_DAILY' ? 'Market research' : "Today's opening IPOs"} ·
-                review only
+                {review.kind === 'MARKET_DAILY'
+                  ? 'Market research'
+                  : review.kind === 'IPO_CLOSING'
+                    ? "Today's closing IPOs"
+                    : "Today's opening IPOs"}{' '}
+                · review only
               </h3>
               <p>
                 Pull reads saved application data without publishing or making a paid research
@@ -229,10 +273,11 @@ export function XControlCenter({ csrf }: { csrf: string }) {
             Review the first live draft and monitor sources before opting into automation.
           </p>
           <p>
-            Automatic publishing requires a successful approved post first. Maximum{' '}
-            {data.daily_limit} publishing attempt(s) per post and {data.monthly_limit} per month,
-            including failures. These are request caps, not a guarantee of your X bill; set a
-            spending cap in the X Developer Console too.
+            Automatic IPO publishing uses public-feed checks without manual guide approval. Market
+            automation requires an approved market post first. Maximum {data.daily_limit} publishing
+            attempt(s) per post and {data.monthly_limit} per month, including failures. These are
+            request caps, not a guarantee of your X bill; set a spending cap in the X Developer
+            Console too.
           </p>
           <div className="admin-table-scroll">
             <table>
@@ -251,7 +296,13 @@ export function XControlCenter({ csrf }: { csrf: string }) {
                   <tr key={p.id}>
                     <td>
                       <strong>
-                        {p.kind === 'MARKET_DAILY' ? 'Daily market update' : 'IPO opening / brief'}
+                        {p.kind === 'MANUAL'
+                          ? 'Manual admin post'
+                          : p.kind === 'MARKET_DAILY'
+                            ? 'Daily market update'
+                            : p.kind === 'IPO_CLOSING'
+                              ? 'IPO closing day'
+                              : 'IPO opening / brief'}
                       </strong>
                       {p.has_image && (
                         <a
@@ -361,7 +412,11 @@ function ScheduleRow({
   const [enabled, setEnabled] = useState(value.enabled);
   const [time, setTime] = useState(value.time);
   const label =
-    kind === 'MARKET_DAILY' ? 'Daily market update · OpenAI' : 'IPO opening day · image included';
+    kind === 'MARKET_DAILY'
+      ? 'Daily market update · OpenAI'
+      : kind === 'IPO_CLOSING'
+        ? 'IPO closing day · image included'
+        : 'IPO opening day · image included';
   return (
     <tr>
       <td>{label}</td>
@@ -392,7 +447,9 @@ function ScheduleRow({
           Save schedule
         </button>{' '}
         <button disabled={busy || !value.enabled} onClick={() => save('generate', { kind })}>
-          Generate next eligible draft
+          {kind === 'MARKET_DAILY'
+            ? "Get today's market-opening draft · OpenAI"
+            : 'Generate next eligible draft'}
         </button>
       </td>
     </tr>

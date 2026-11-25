@@ -18,12 +18,10 @@ const overview = {
   },
 };
 it('saves only the selected schedule in IST with CSRF', async () => {
-  const fetcher = vi
-    .fn()
-    .mockImplementation(async (_url, options) => ({
-      ok: true,
-      json: async () => (options?.method === 'POST' ? { message: 'Schedule saved' } : overview),
-    }));
+  const fetcher = vi.fn().mockImplementation(async (_url, options) => ({
+    ok: true,
+    json: async () => (options?.method === 'POST' ? { message: 'Schedule saved' } : overview),
+  }));
   vi.stubGlobal('fetch', fetcher);
   render(<XControlCenter csrf="csrf-token" />);
   const clock = await screen.findByLabelText('Daily market update · OpenAI time in IST');
@@ -74,4 +72,32 @@ it('renders nested evidence safely and provides an authenticated image preview',
     'rel',
     'noopener noreferrer',
   );
+});
+
+it('previews manual text and saves only a draft with CSRF', async () => {
+  const fetcher = vi.fn().mockImplementation(async (_url, options) => ({
+    ok: true,
+    json: async () => (options?.method === 'POST' ? { message: 'Manual draft saved' } : overview),
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.change(await screen.findByLabelText('Message to publish'), {
+    target: { value: 'MeraIPO test message' },
+  });
+  expect(screen.getByText('MeraIPO test message', { selector: 'p' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save manual draft for review' }));
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/v1/admin/x/manual-draft',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-token' }),
+        body: JSON.stringify({ content: 'MeraIPO test message' }),
+      }),
+    ),
+  );
+  expect(fetcher.mock.calls.some(([url]) => url.endsWith('/publish'))).toBe(false);
+  expect(
+    screen.getByRole('button', { name: "Get today's market-opening draft · OpenAI" }),
+  ).toBeDisabled();
 });

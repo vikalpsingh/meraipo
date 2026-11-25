@@ -193,7 +193,7 @@ class AutoInput(BaseModel):
 
 
 class ScheduleInput(BaseModel):
-    kind: Literal["MARKET_DAILY", "IPO_OPENING"]
+    kind: Literal["MARKET_DAILY", "IPO_OPENING", "IPO_CLOSING"]
     enabled: StrictBool
     time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
@@ -240,65 +240,81 @@ async def market_auto(data: AutoInput, auth=Depends(admin), db=Depends(get_sessi
 
 
 class GenerateInput(BaseModel):
-    kind: Literal["MARKET_DAILY", "IPO_OPENING"]
+    kind: Literal["MARKET_DAILY", "IPO_OPENING", "IPO_CLOSING"]
+
+
+class ManualDraftInput(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/manual-draft")
+async def manual_draft(data: ManualDraftInput, auth=Depends(admin), db=Depends(get_session)):
+    import hashlib
+
+    configured()
+    content = data.content.strip()
+    if not content or service.weighted_length(content) > 280:
+        raise HTTPException(422, "Enter a non-empty post within X's 280 weighted-character limit.")
+    day = m.now().astimezone(service.IST).date()
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    async with service.operation_lock():
+        key = f"MANUAL:{day}:{digest}"
+        existing = await db.scalar(select(m.XPost).where(m.XPost.dedupe_key == key))
+        if existing:
+            return {
+                "message": "This text already exists in today's ledger. Review that post; no duplicate was created."
+            }
+        row = m.XPost(
+            kind="MANUAL",
+            trading_date=day,
+            dedupe_key=key,
+            content=content,
+            content_hash=digest,
+            status="DRAFT",
+            evidence={"origin": "admin_entered", "review_required": True},
+        )
+        db.add(row)
+        await db.flush()
+        audit(db, auth, "manual_draft_created", row.id)
+        await db.commit()
+    return {
+        "message": "Manual draft saved. Review it below, Approve, then Publish now to send a real public post to @MeraIPO."
+    }
 
 
 @router.post("/review")
 async def review_sources(data: GenerateInput, auth=Depends(admin), db=Depends(get_session)):
     """Read stored sources without paid research, publishing or changing approval."""
-    from datetime import timedelta
-
-    from packages.shared.calculations import utc
-
     now = m.now()
     day = now.astimezone(service.IST).date()
     items = []
-    if data.kind == "IPO_OPENING":
+    if data.kind in ("IPO_OPENING", "IPO_CLOSING"):
         rows = (
             await db.execute(
                 select(m.IPO, m.IPODate, m.ApplicantGuide, m.Company)
                 .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
                 .join(m.Company, m.Company.id == m.IPO.company_id)
                 .outerjoin(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
-                .where(m.IPODate.open_date == day, m.Company.is_demo.is_(False))
+                .where(
+                    (m.IPODate.close_date if data.kind == "IPO_CLOSING" else m.IPODate.open_date)
+                    == day,
+                    m.Company.is_demo.is_(False),
+                )
                 .order_by(m.Company.name)
                 .limit(100)
             )
         ).all()
-        for ipo, dates, guide, company in rows:
-            from urllib.parse import urlsplit
-
-            host = (urlsplit(guide.source_url or "").hostname or "").lower() if guide else ""
-            checks = {
-                "Open or upcoming": ipo.status in ("OPEN", "UPCOMING"),
-                "Bidding has not closed": dates.close_date is not None and dates.close_date >= day,
-                "Guide verified": bool(guide and guide.verification_status == "VERIFIED"),
-                "Schedule confirmed": bool(guide and guide.schedule_status == "CONFIRMED"),
-                "Approved source": any(
-                    host == d or host.endswith("." + d)
-                    for d in ("nseindia.com", "bseindia.com", "ipoalerts.in")
-                ),
-                "Fresh source": bool(
-                    ipo.source_timestamp
-                    and now - timedelta(hours=settings().x_max_age_hours)
-                    <= utc(ipo.source_timestamp)
-                    <= now
-                ),
-                "Guide reviewed within 30 days": bool(
-                    guide
-                    and guide.reviewed_on
-                    and day - timedelta(days=30) <= guide.reviewed_on <= day
-                ),
-                "Not cancelled or postponed": (ipo.raw_status or "").upper()
-                not in ("CANCELLED", "POSTPONED", "WITHDRAWN"),
-            }
+        for ipo, dates, _guide, company in rows:
+            checks, source = await service.public_ipo_review(
+                db, ipo, dates, closing=data.kind == "IPO_CLOSING"
+            )
             items.append(
                 {
                     "title": company.name,
                     "content": f"Opening {dates.open_date}; closing {dates.close_date}; IPO upper band: {ipo.price_high}",
                     "checks": checks,
                     "evidence": {
-                        "source": guide.source_url if guide else None,
+                        "source": source,
                         "source_timestamp": str(ipo.source_timestamp),
                     },
                 }
@@ -356,12 +372,10 @@ async def auto(data: AutoInput, auth=Depends(admin), db=Depends(get_session)):
         a = await service.account(db)
         if data.enabled:
             configured()
-            if not a.tokens or not await db.scalar(
-                select(m.XPost.id).where(m.XPost.status == "PUBLISHED").limit(1)
-            ):
+            if not a.tokens:
                 raise HTTPException(
                     409,
-                    "Connect @MeraIPO and successfully publish an approved post before enabling automatic publishing.",
+                    "Connect @MeraIPO before enabling automatic IPO publishing. Market automation still requires a successful approved market post.",
                 )
         a.auto_publish = data.enabled
         audit(db, auth, "auto_on" if data.enabled else "auto_off")

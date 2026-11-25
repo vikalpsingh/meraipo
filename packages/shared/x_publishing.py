@@ -24,6 +24,7 @@ IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_SCHEDULES = {
     "MARKET_DAILY": {"enabled": False, "time": "08:45", "auto_publish": False},
     "IPO_OPENING": {"enabled": False, "time": "09:00"},
+    "IPO_CLOSING": {"enabled": False, "time": "09:15"},
 }
 
 
@@ -37,11 +38,17 @@ def due(config, now):
     return config["enabled"] and 0 <= elapsed < 60
 
 
-async def opening_image(db, ipo_id):
+async def opening_image(db, ipo_id, closing=False):
     from packages.shared.email_template import content
 
     item = await content(
-        db, ipo_id, settings().public_origin, "", opening=True, inline_attachment=True
+        db,
+        ipo_id,
+        settings().public_origin,
+        "",
+        opening=True,
+        closing=closing,
+        inline_attachment=True,
     )
     return item["chart_png"]
 
@@ -50,7 +57,7 @@ async def validate_post(db, row):
     now = m.now()
     if row.trading_date != now.astimezone(IST).date():
         raise x_api.XError("DRAFT_EXPIRED")
-    if not trading_day(await load_market_settings(db), row.trading_date):
+    if row.kind != "MANUAL" and not trading_day(await load_market_settings(db), row.trading_date):
         raise x_api.XError("NON_TRADING_DAY")
     a = await account(db)
     if row.kind in DEFAULT_SCHEDULES and not schedules(a)[row.kind]["enabled"]:
@@ -64,14 +71,18 @@ async def validate_post(db, row):
         # Evidence is model-selected; automation requires a separate tested opt-in.
         if not row.evidence.get("facts"):
             raise x_api.XError("AI_INSUFFICIENT_EVIDENCE")
-    else:
-        text, _ = await snapshot(db, row.evidence.get("ipo_id"), row.kind == "IPO_OPENING")
+    elif row.kind != "MANUAL":
+        text, _ = await snapshot(
+            db, row.evidence.get("ipo_id"), row.kind == "IPO_OPENING", row.kind == "IPO_CLOSING"
+        )
         if text != row.content:
             raise x_api.XError("SOURCE_CHANGED_REGENERATE")
-        if row.kind == "IPO_OPENING":
+        if row.kind in ("IPO_OPENING", "IPO_CLOSING"):
             # Quote identity, not PNG render clock, is compared before publishing.
             if await quote_key(db, row.evidence["ipo_id"]) != row.evidence.get("quote_key"):
                 raise x_api.XError("GMP_CHANGED_REGENERATE")
+    if not row.content.strip():
+        raise x_api.XError("EMPTY_DRAFT")
     if weighted_length(row.content) > 280:
         raise x_api.XError("DRAFT_TOO_LONG")
 
@@ -107,10 +118,15 @@ async def generate_scheduled(db, kind, manual=False):
         [None]
         if kind == "MARKET_DAILY"
         else list(
-            await db.scalars(select(m.IPODate.ipo_id).where(m.IPODate.open_date == local.date()))
+            await db.scalars(
+                select(m.IPODate.ipo_id).where(
+                    (m.IPODate.close_date if kind == "IPO_CLOSING" else m.IPODate.open_date)
+                    == local.date()
+                )
+            )
         )
     )
-    if manual and kind == "IPO_OPENING":
+    if manual and kind in ("IPO_OPENING", "IPO_CLOSING"):
         existing = set(
             await db.scalars(
                 select(m.XPost.dedupe_key).where(
@@ -124,9 +140,22 @@ async def generate_scheduled(db, kind, manual=False):
     for ipo_id in ids:
         key = f"{kind}:{local.date()}:{ipo_id or 'market'}"
         row = await db.scalar(select(m.XPost).where(m.XPost.dedupe_key == key))
+        refreshed = False
+        if (
+            row
+            and kind in ("IPO_OPENING", "IPO_CLOSING")
+            and row.status == "BLOCKED"
+            and row.attempts == 0
+        ):
+            ipo = await db.get(m.IPO, ipo_id)
+            refreshed = bool(
+                ipo
+                and ipo.source_timestamp
+                and str(ipo.source_timestamp) != row.evidence.get("source_timestamp")
+            )
         if row and not (
-            manual
-            and kind == "IPO_OPENING"
+            (manual or refreshed)
+            and kind in ("IPO_OPENING", "IPO_CLOSING")
             and row.status in ("BLOCKED", "DRAFT", "FAILED")
             and row.attempts == 0
         ):
@@ -149,9 +178,11 @@ async def generate_scheduled(db, kind, manual=False):
             if kind == "MARKET_DAILY":
                 text, evidence = await market_research.generate(now)
             else:
-                text, evidence = await snapshot(db, ipo_id, opening=True)
+                text, evidence = await snapshot(
+                    db, ipo_id, opening=kind == "IPO_OPENING", closing=kind == "IPO_CLOSING"
+                )
                 before = await quote_key(db, ipo_id)
-                row.image_png = await opening_image(db, ipo_id)
+                row.image_png = await opening_image(db, ipo_id, closing=kind == "IPO_CLOSING")
                 evidence["quote_key"] = await quote_key(db, ipo_id)
                 if before != evidence["quote_key"]:
                     raise x_api.XError("GMP_CHANGED_REGENERATE")
@@ -160,7 +191,7 @@ async def generate_scheduled(db, kind, manual=False):
             can_auto = (
                 not manual
                 and a.auto_publish
-                and (kind == "IPO_OPENING" or config.get("auto_publish", False))
+                and (kind in ("IPO_OPENING", "IPO_CLOSING") or config.get("auto_publish", False))
             )
             row.status = "QUEUED" if can_auto else "DRAFT"
         except x_api.XError as exc:
@@ -223,7 +254,93 @@ async def account(db):
     return await db.get(m.XAccount, "meraipo", populate_existing=True)
 
 
-async def snapshot(db, ipo_id=None, opening=False):
+async def public_ipo_review(db, ipo, dates, closing=False):
+    """Use published feed provenance, never an administrator's guide approval."""
+    now = m.now()
+    day = now.astimezone(IST).date()
+    detail = await db.scalar(
+        select(m.IPOProviderDetail).where(m.IPOProviderDetail.ipo_id == ipo.id)
+    )
+    guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
+    source = detail.source_url if detail else (guide.source_url if guide else "")
+    provider = (ipo.source_provider or "").lower()
+    # IPOAlerts imports may not contain a per-company source URL.
+    if not source and provider == "ipoalerts":
+        source = "https://ipoalerts.in/"
+    host = (urlsplit(source or "").hostname or "").lower()
+    checks = {
+        "Public feed source": bool(
+            source
+            and source.startswith("https://")
+            and any(
+                host == d or host.endswith("." + d)
+                for d in ("nseindia.com", "bseindia.com", "ipoalerts.in", "ipowatch.in")
+            )
+        ),
+        "Fresh feed": bool(
+            ipo.source_timestamp
+            and now - timedelta(hours=settings().x_max_age_hours)
+            <= utc(ipo.source_timestamp)
+            <= now
+        ),
+        "Open or upcoming": ipo.status in ("OPEN", "UPCOMING"),
+        "No flagged data conflict": (ipo.quality or "").upper()
+        not in ("CONFLICT", "CONFLICTED", "INVALID", "REJECTED"),
+        "Application dates valid": bool(
+            dates.open_date and dates.close_date and dates.open_date <= day <= dates.close_date
+        ),
+        "Event is today": (dates.close_date if closing else dates.open_date) == day,
+        "Not cancelled or postponed": (ipo.raw_status or "").upper()
+        not in ("CANCELLED", "POSTPONED", "WITHDRAWN"),
+    }
+    return checks, source
+
+
+async def public_ipo_snapshot(db, ipo_id, closing=False):
+    now = m.now()
+    day = now.astimezone(IST).date()
+    if not trading_day(await load_market_settings(db), day):
+        raise x_api.XError("NON_TRADING_DAY")
+    rows = (
+        await db.execute(
+            select(m.IPO, m.IPODate, m.Company)
+            .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+            .join(m.Company, m.Company.id == m.IPO.company_id)
+            .where(m.Company.is_demo.is_(False), m.IPO.id == ipo_id)
+        )
+    ).all()
+    for ipo, dates, company in rows:
+        checks, source = await public_ipo_review(db, ipo, dates, closing)
+        if not all(checks.values()):
+            error = x_api.XError("IPO_PUBLIC_SOURCE_NOT_READY")
+            error.review = {
+                "checks": checks,
+                "source_url": source,
+                "source_timestamp": str(ipo.source_timestamp),
+            }
+            raise error
+        name = " ".join(company.name.split()).replace("@", "").replace("#", "")[:80]
+        text = (
+            f"IPO {'closes' if closing else 'opens'} today | {day:%d %b %Y}\n{name}\n"
+            f"Applications: {dates.open_date:%d %b}–{dates.close_date:%d %b}.\n"
+            f"https://www.meraipo.com/ipo/{company.slug}\nPublic-feed reminder. GMP unofficial; returns not guaranteed."
+        )
+        if weighted_length(text) > 280:
+            raise x_api.XError("DRAFT_TOO_LONG")
+        return text, {
+            "ipo_id": ipo.id,
+            "source_url": source,
+            "source_timestamp": ipo.source_timestamp.isoformat(),
+            "generated_at": now.isoformat(),
+            "policy": "public_feed",
+            "event": "closing" if closing else "opening",
+        }
+    raise x_api.XError("NO_OPENING_OR_CLOSING_IPO")
+
+
+async def snapshot(db, ipo_id=None, opening=False, closing=False):
+    if opening or closing:
+        return await public_ipo_snapshot(db, ipo_id, closing)
     now = m.now()
     day = now.astimezone(IST).date()
     config = await load_market_settings(db)
@@ -319,7 +436,8 @@ async def publish(db, key):
     if not row or row.status not in ("APPROVED", "QUEUED"):
         raise x_api.XError("APPROVAL_REQUIRED")
     if not row.approved_at and (
-        not a.auto_publish
+        row.kind == "MANUAL"
+        or not a.auto_publish
         or (
             row.kind == "MARKET_DAILY"
             and not schedules(a)["MARKET_DAILY"].get("auto_publish", False)

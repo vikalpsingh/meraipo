@@ -160,3 +160,43 @@ recover previously discarded output. ChatGPT conversations are not imported.
 Generate next eligible draft remains subject to the daily research cap. Manual
 IPO regeneration is allowed only before publishing attempts, and all manually
 generated content stays DRAFT even when automation is enabled.
+
+## Manual connection test posts
+MeraAdmin includes a textarea and preview for administrator-entered text. Save manual
+draft for review does not send anything. Approve, then Publish now explicitly queues
+a real public post to @MeraIPO, using the same identity checks, outbox, attempt caps
+and uncertain-send handling. Manual posts do not require an opening IPO or a trading
+day, but expire at IST date rollover and can never use automatic approval. Exact
+same-day text is deduplicated. Admin-entered claims are not verified market research.
+No new database migration is required.
+
+Get today's market-opening draft · OpenAI uses the server Responses API, not a
+ChatGPT conversation. Enable and save the market schedule first. It preserves the
+one-research-request-per-day safeguard and saves manually requested output for review.
+An existing blocked daily request is not retried or replaced by manual text.
+
+## Public-feed IPO automation (opening and closing)
+IPO_OPENING and IPO_CLOSING now have independent stored schedules (defaults 09:00
+and 09:15 IST, disabled until selected). With the global automatic-publishing toggle
+enabled, both queue posts without guide verification, schedule-confirmation flags,
+review dates or a previously approved test post. Account connection remains required.
+The separate OpenAI automation gate still requires a successful approved market post.
+
+Source selection uses stored IPOProviderDetail provenance, falling back to an existing
+source URL or the IPOAlerts provider identity. Accepted public feed hosts are NSE, BSE,
+IPOAlerts and IPOWatch (the configured IPOWEB source). Public-feed reminders do not
+claim exchange verification. Non-demo data, current event dates, freshness, cancellation
+and conflict checks remain enforced. GMP stays explicitly unofficial and stale GMP
+is omitted by the shared image renderer. This does not modify email eligibility.
+
+Opening and closing events have separate type/date/IPO duplicate keys, including when
+both dates coincide. A blocked, unattempted IPO post can be reconsidered automatically
+when its source timestamp changes during the schedule window. Schedule the ingestion
+job before the X jobs; a failed sync is not bypassed by changing timestamps. No additional
+provider fetch or paid research is performed by the IPO post job. Manual generation
+continues to create drafts; automation only applies to scheduled generation.
+
+No migration is needed: schedules are JSON and post kinds are strings. Deploy API,
+worker, scheduler and web together. Enable/save both schedules and then enable the
+global automatic-publishing toggle. Disable either schedule or the global toggle to
+stop future automatic publishing. Existing published/uncertain posts are not retried.
