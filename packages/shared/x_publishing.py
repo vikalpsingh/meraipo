@@ -157,13 +157,16 @@ async def generate_scheduled(db, kind, manual=False):
                     raise x_api.XError("GMP_CHANGED_REGENERATE")
             row.content, row.evidence = text, evidence
             row.content_hash = hashlib.sha256(text.encode()).hexdigest()
-            can_auto = a.auto_publish and (
-                kind == "IPO_OPENING" or config.get("auto_publish", False)
+            can_auto = (
+                not manual
+                and a.auto_publish
+                and (kind == "IPO_OPENING" or config.get("auto_publish", False))
             )
             row.status = "QUEUED" if can_auto else "DRAFT"
         except x_api.XError as exc:
             row.status, row.error_code = "BLOCKED", exc.code
             row.api_status, row.request_id = exc.status, exc.request_id
+            row.evidence = getattr(exc, "review", {})
         await db.commit()
         result.append(row)
         break

@@ -57,7 +57,14 @@ def validate_result(payload, now):
     except (ValidationError, ValueError) as exc:
         raise XError("AI_RESEARCH_INVALID") from exc
     if not research.ready or not research.facts:
-        raise XError("AI_INSUFFICIENT_EVIDENCE")
+        error = XError("AI_INSUFFICIENT_EVIDENCE")
+        error.review = {
+            "reason": research.reason,
+            "unverified_preview": research.text,
+            "review_only": True,
+            "generated_at": now.isoformat(),
+        }
+        raise error
     for fact in research.facts:
         host = (urlsplit(fact.url).hostname or "").lower()
         if (

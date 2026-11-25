@@ -148,3 +148,15 @@ Disconnect clears local tokens; if remote revocation fails, revoke the app in X 
 - https://docs.x.com/x-api/posts/create-post
 - https://docs.x.com/x-api/media/upload-media
 - https://docs.x.com/x-api/getting-started/pricing
+
+## Pull content for review
+Each schedule has a Pull content for review button. This reads stored data only; it
+never spends an OpenAI request or publishes. IPO review includes today's non-demo
+opening companies, including unverified ones, with individual eligibility checks.
+It does not mark their guides verified or refresh the external IPO feed.
+Market review shows today's saved research. Future insufficient-evidence results
+retain the model's reason and an explicitly unverified preview; older failures cannot
+recover previously discarded output. ChatGPT conversations are not imported.
+Generate next eligible draft remains subject to the daily research cap. Manual
+IPO regeneration is allowed only before publishing attempts, and all manually
+generated content stays DRAFT even when automation is enabled.

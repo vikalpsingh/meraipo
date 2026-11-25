@@ -243,6 +243,91 @@ class GenerateInput(BaseModel):
     kind: Literal["MARKET_DAILY", "IPO_OPENING"]
 
 
+@router.post("/review")
+async def review_sources(data: GenerateInput, auth=Depends(admin), db=Depends(get_session)):
+    """Read stored sources without paid research, publishing or changing approval."""
+    from datetime import timedelta
+
+    from packages.shared.calculations import utc
+
+    now = m.now()
+    day = now.astimezone(service.IST).date()
+    items = []
+    if data.kind == "IPO_OPENING":
+        rows = (
+            await db.execute(
+                select(m.IPO, m.IPODate, m.ApplicantGuide, m.Company)
+                .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+                .join(m.Company, m.Company.id == m.IPO.company_id)
+                .outerjoin(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
+                .where(m.IPODate.open_date == day, m.Company.is_demo.is_(False))
+                .order_by(m.Company.name)
+                .limit(100)
+            )
+        ).all()
+        for ipo, dates, guide, company in rows:
+            from urllib.parse import urlsplit
+
+            host = (urlsplit(guide.source_url or "").hostname or "").lower() if guide else ""
+            checks = {
+                "Open or upcoming": ipo.status in ("OPEN", "UPCOMING"),
+                "Bidding has not closed": dates.close_date is not None and dates.close_date >= day,
+                "Guide verified": bool(guide and guide.verification_status == "VERIFIED"),
+                "Schedule confirmed": bool(guide and guide.schedule_status == "CONFIRMED"),
+                "Approved source": any(
+                    host == d or host.endswith("." + d)
+                    for d in ("nseindia.com", "bseindia.com", "ipoalerts.in")
+                ),
+                "Fresh source": bool(
+                    ipo.source_timestamp
+                    and now - timedelta(hours=settings().x_max_age_hours)
+                    <= utc(ipo.source_timestamp)
+                    <= now
+                ),
+                "Guide reviewed within 30 days": bool(
+                    guide
+                    and guide.reviewed_on
+                    and day - timedelta(days=30) <= guide.reviewed_on <= day
+                ),
+                "Not cancelled or postponed": (ipo.raw_status or "").upper()
+                not in ("CANCELLED", "POSTPONED", "WITHDRAWN"),
+            }
+            items.append(
+                {
+                    "title": company.name,
+                    "content": f"Opening {dates.open_date}; closing {dates.close_date}; IPO upper band: {ipo.price_high}",
+                    "checks": checks,
+                    "evidence": {
+                        "source": guide.source_url if guide else None,
+                        "source_timestamp": str(ipo.source_timestamp),
+                    },
+                }
+            )
+    else:
+        rows = (
+            await db.scalars(
+                select(m.XPost).where(m.XPost.kind == "MARKET_DAILY", m.XPost.trading_date == day)
+            )
+        ).all()
+        for row in rows:
+            items.append(
+                {
+                    "title": row.status,
+                    "content": row.content or "No publishable draft saved.",
+                    "checks": {},
+                    "evidence": row.evidence
+                    or {
+                        "reason": row.error_code,
+                        "note": "Older blocked runs did not retain the research explanation.",
+                    },
+                }
+            )
+    return {
+        "message": "Stored content loaded for review. No email, X post or paid research request was sent.",
+        "review": {"kind": data.kind, "items": items},
+    }
+
+
 @router.post("/generate")
 async def generate_type(data: GenerateInput, auth=Depends(admin), db=Depends(get_session)):
     configured()

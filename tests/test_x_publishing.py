@@ -379,3 +379,57 @@ async def test_auto_requires_success(db, monkeypatch):
 
     with pytest.raises(HTTPException):
         await auto(AutoInput(enabled=True), (SimpleNamespace(id=None),), db)
+
+
+def test_blocked_market_retains_review_only_explanation():
+    import json
+
+    from packages.providers.market_research import validate_result
+
+    payload = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(
+                            {
+                                "ready": False,
+                                "text": "Unverified candidate",
+                                "facts": [],
+                                "reason": "No dated exchange evidence",
+                            }
+                        ),
+                    }
+                ],
+            }
+        ],
+    }
+    with pytest.raises(x_api.XError) as caught:
+        validate_result(payload, datetime.now(timezone.utc))
+    assert caught.value.code == "AI_INSUFFICIENT_EVIDENCE"
+    assert caught.value.review["reason"] == "No dated exchange evidence"
+    assert caught.value.review["review_only"] is True
+
+
+async def test_review_includes_ipo_with_unverified_guide(db, draft_setup):
+    from apps.api.x_routes import GenerateInput, review_sources
+
+    row, ipo, account = draft_setup
+    guide = await db.scalar(select(m.ApplicantGuide).where(m.ApplicantGuide.ipo_id == ipo.id))
+    guide.verification_status = "UNVERIFIED"
+    await db.commit()
+    result = await review_sources(GenerateInput(kind="IPO_OPENING"), auth=None, db=db)
+    assert result["review"]["items"]
+    assert result["review"]["items"][0]["checks"]["Guide verified"] is False
+
+
+async def test_manual_generation_requires_review_even_with_auto(db, draft_setup):
+    row, ipo, account = draft_setup
+    account.auto_publish = True
+    account.schedules = {"IPO_OPENING": {"enabled": True, "time": "08:45"}}
+    await db.commit()
+    rows = await service.generate_scheduled(db, "IPO_OPENING", manual=True)
+    assert rows[0].status == "DRAFT"

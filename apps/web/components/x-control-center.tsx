@@ -33,6 +33,15 @@ type Overview = {
   posts: Post[];
 };
 export function XControlCenter({ csrf }: { csrf: string }) {
+  const [review, setReview] = useState<{
+    kind: Kind;
+    items: {
+      title: string;
+      content: string;
+      checks: Record<string, boolean>;
+      evidence: Record<string, unknown>;
+    }[];
+  } | null>(null);
   const [data, setData] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -67,6 +76,7 @@ export function XControlCenter({ csrf }: { csrf: string }) {
       });
       const result = await r.json();
       if (!r.ok) throw new Error(result.error?.message || result.detail || 'X action failed.');
+      if (result.review) setReview(result.review);
       if (path === 'connect' && result.url) {
         window.location.assign(result.url);
         return;
@@ -140,6 +150,61 @@ export function XControlCenter({ csrf }: { csrf: string }) {
             research request per day; incomplete or interrupted research is not automatically
             charged again. Review source dates and all figures before approval.
           </p>
+          {review && (
+            <section aria-label="Pulled content for review" className="panel">
+              <h3>
+                {review.kind === 'MARKET_DAILY' ? 'Market research' : "Today's opening IPOs"} ·
+                review only
+              </h3>
+              <p>
+                Pull reads saved application data without publishing or making a paid research
+                request. ChatGPT chat content is not imported. Generate creates a draft for
+                approval; market research remains limited to one request per day.
+              </p>
+              {!review.items.length && (
+                <p>
+                  No stored content found for today. Check IPO dates or generate the first market
+                  draft.
+                </p>
+              )}
+              {review.items.map((item, i) => (
+                <article key={i}>
+                  <h4>{item.title}</h4>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{item.content}</p>
+                  {Object.keys(item.checks).length > 0 && (
+                    <div className="admin-table-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Publishing requirement</th>
+                            <th>Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(item.checks).map(([name, passed]) => (
+                            <tr key={name}>
+                              <td>{name}</td>
+                              <td>{passed ? 'Passed' : 'Needs attention'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <dl>
+                    {Object.entries(item.evidence).map(([name, value]) => (
+                      <div key={name}>
+                        <dt>{name}</dt>
+                        <dd style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                          {typeof value === 'string' ? value : JSON.stringify(value)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </article>
+              ))}
+            </section>
+          )}
           <label>
             <input
               type="checkbox"
@@ -320,6 +385,9 @@ function ScheduleRow({
         />
       </td>
       <td>
+        <button disabled={busy} onClick={() => save('review', { kind })}>
+          Pull content for review
+        </button>{' '}
         <button disabled={busy || !time} onClick={() => save('schedule', { kind, enabled, time })}>
           Save schedule
         </button>{' '}
