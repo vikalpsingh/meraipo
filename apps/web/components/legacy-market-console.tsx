@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 
 import { useCallback, useEffect, useState } from 'react';
 import { human, timestamp } from '@/lib/format';
@@ -116,9 +117,7 @@ export function LegacyMarketConsole({ csrf, companies }: { csrf: string; compani
         </button>
       </div>
       {message && (
-        <p role="status" className="notice">
-          {message}
-        </p>
+        <AdminActionFeedback role="status">{message}</AdminActionFeedback>
       )}
       {!data ? (
         <p>Loading scheduler…</p>
@@ -143,7 +142,7 @@ export function LegacyMarketConsole({ csrf, companies }: { csrf: string; compani
                 </li>
               ))}
             </ul>
-            {data.configuration_error && <p role="alert">{data.configuration_error}</p>}
+            {data.configuration_error && <AdminActionFeedback role="alert">{data.configuration_error}</AdminActionFeedback>}
             <details>
               <summary>Provider setup and safety</summary>
               <p>

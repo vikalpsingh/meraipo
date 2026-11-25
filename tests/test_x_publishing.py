@@ -577,3 +577,25 @@ async def test_openai_connection_provider_no_research(monkeypatch):
     post.return_value = httpx.Response(401)
     with pytest.raises(x_api.XError, match="OPENAI_HTTP_401"):
         await market_research.connection_test()
+
+
+@pytest.mark.parametrize(
+    "provider_code,expected",
+    [
+        ("insufficient_quota", "OPENAI_QUOTA_EXHAUSTED"),
+        ("rate_limit_exceeded", "OPENAI_RATE_LIMITED"),
+        ("unknown", "OPENAI_HTTP_429"),
+    ],
+)
+def test_openai_429_classification(provider_code, expected):
+    import httpx
+
+    from packages.providers.market_research import response_error
+
+    error = response_error(
+        httpx.Response(
+            429, json={"error": {"code": provider_code, "message": "private account data"}}
+        )
+    )
+    assert error.code == expected and error.status == 429
+    assert "private" not in str(error)

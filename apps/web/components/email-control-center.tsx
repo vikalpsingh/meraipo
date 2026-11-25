@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { EmailApplicationSchedule } from './email-application-schedule';
 import type { Company } from '@/lib/types';
@@ -159,7 +160,7 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
           Refresh readiness and metrics
         </button>
       </div>
-      <p role="status">{message}</p>
+      <AdminActionFeedback role="status">{message}</AdminActionFeedback>
 
       {!data && <p role="status">Loading email status…</p>}
       {data && (
@@ -382,7 +383,7 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
               {sampleBusy ? 'Queuing sample…' : 'Send sample email'}
             </button>
           </div>
-          <p role="status">{sampleMessage}</p>
+          <AdminActionFeedback role="status">{sampleMessage}</AdminActionFeedback>
         </form>
         <details className="email-test-details">
           <summary>Inbox readiness and category tests</summary>
@@ -516,7 +517,7 @@ export function EmailControlCenter({ csrf, companies }: { csrf: string; companie
                     Queue {selected.length || ''} test email{selected.length === 1 ? '' : 's'}
                   </button>
                 </div>
-                <p role="status">{categoryMessage}</p>
+                <AdminActionFeedback role="status">{categoryMessage}</AdminActionFeedback>
               </form>
               {preview && (
                 <details open>

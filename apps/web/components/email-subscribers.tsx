@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useEffect, useState } from 'react';
 import { timestamp } from '@/lib/format';
 type Data = {
@@ -182,9 +183,9 @@ export function EmailSubscribers({ csrf }: { csrf: string }) {
         <button className="outline-button" disabled={!reviewed || reminderBusy} onClick={remind}>
           {reminderBusy ? 'Queuing…' : 'Send bulk confirmation reminders'}
         </button>
-        <p role="status">{reminderMessage}</p>
+        <AdminActionFeedback role="status">{reminderMessage}</AdminActionFeedback>
       </div>
-      <p role="status">{recordMessage}</p>
+      <AdminActionFeedback role="status">{recordMessage}</AdminActionFeedback>
       {editing && (
         <form
           className="panel"
@@ -254,7 +255,7 @@ export function EmailSubscribers({ csrf }: { csrf: string }) {
         </div>
       )}
       {busy && <p role="status">Loading subscribers…</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && <AdminActionFeedback role="alert">{error}</AdminActionFeedback>}
       {data && (
         <>
           <div

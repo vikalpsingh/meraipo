@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 
 import { useCallback, useEffect, useState } from 'react';
 import { human, timestamp } from '@/lib/format';
@@ -68,9 +69,7 @@ export function FeedbackInbox({ csrf }: { csrf: string }) {
         </button>
       </div>
       {message && (
-        <p role="status" className="notice">
-          {message}
-        </p>
+        <AdminActionFeedback role="status">{message}</AdminActionFeedback>
       )}
       {items.length === 0 && <p className="panel empty">No feedback on this page yet.</p>}
       {items.map((item) => (

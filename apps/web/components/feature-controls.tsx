@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 type Feature = { key: string; label: string; description: string; enabled: boolean };
@@ -61,7 +62,7 @@ export function FeatureControls({ csrf }: { csrf: string }) {
         Keep unfinished tabs hidden. Enable a feature when it is ready for visitors. New features
         start hidden.
       </p>
-      <p role="status">{status}</p>
+      <AdminActionFeedback role="status">{status}</AdminActionFeedback>
       {items.map((feature) => (
         <div key={feature.key} className="card">
           <h3>{feature.label}</h3>

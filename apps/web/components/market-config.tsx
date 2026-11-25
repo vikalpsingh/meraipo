@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -81,7 +82,7 @@ export function MarketConfig({ csrf }: { csrf: string }) {
     }
   }
 
-  if (!config) return <p role="status">{message || 'Loading market configuration…'}</p>;
+  if (!config) return <AdminActionFeedback role="status">{message || 'Loading market configuration…'}</AdminActionFeedback>;
 
   return (
     <section className="panel" aria-labelledby="config-heading">
@@ -95,9 +96,7 @@ export function MarketConfig({ csrf }: { csrf: string }) {
         {config.ipoalerts_api_key_configured ? 'configured' : 'not configured'}.
       </p>
       {message && (
-        <p className="notice" role="status">
-          {message}
-        </p>
+        <AdminActionFeedback role="status">{message}</AdminActionFeedback>
       )}
       <form className="admin-form" onSubmit={save}>
         <fieldset>

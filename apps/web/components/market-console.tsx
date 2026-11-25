@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { Company } from '@/lib/types';
@@ -419,12 +420,10 @@ export function MarketConsole({ csrf, companies }: { csrf: string; companies: Co
         </p>
       )}
       {message && (
-        <p className="notice" role="status">
-          {message}
-        </p>
+        <AdminActionFeedback role="status">{message}</AdminActionFeedback>
       )}
       {(error || data?.configuration_error) && (
-        <p role="alert">{error || data?.configuration_error}</p>
+        <AdminActionFeedback role="alert">{error || data?.configuration_error}</AdminActionFeedback>
       )}
       <nav className="job-navigation" aria-label="Data operations">
         <div>

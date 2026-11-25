@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useEffect, useState } from 'react';
 type Campaign = {
   ipo_id: string;
@@ -199,7 +200,7 @@ export function EmailAlertsAnalytics() {
           </>
         )}
       </div>
-      <p role="status">{busy ? 'Loading analytics…' : error}</p>
+      <AdminActionFeedback role="status">{busy ? 'Loading analytics…' : error}</AdminActionFeedback>
       {data && (
         <>
           <p>

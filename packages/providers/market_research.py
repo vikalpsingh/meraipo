@@ -21,6 +21,26 @@ DOMAINS = [
 ]
 
 
+def response_error(response):
+    """Classify known provider codes without exposing raw bodies or credentials."""
+    code = "OPENAI_HTTP_" + str(response.status_code)
+    if response.status_code == 429:
+        try:
+            error = response.json().get("error", {})
+            provider_code = error.get("code") or error.get("type")
+        except (ValueError, AttributeError, TypeError):
+            provider_code = None
+        if provider_code in (
+            "insufficient_quota",
+            "billing_hard_limit_reached",
+            "billing_not_active",
+        ):
+            code = "OPENAI_QUOTA_EXHAUSTED"
+        elif provider_code in ("rate_limit_exceeded", "rate_limit_error"):
+            code = "OPENAI_RATE_LIMITED"
+    return XError(code, response.status_code)
+
+
 class Fact(BaseModel):
     model_config = ConfigDict(extra="forbid")
     claim: str = Field(max_length=500)
@@ -133,7 +153,7 @@ async def generate(now):
                 headers={"Authorization": "Bearer " + c.openai_api_key.get_secret_value()},
             )
         if response.status_code != 200:
-            raise XError("OPENAI_HTTP_" + str(response.status_code), response.status_code)
+            raise response_error(response)
         return validate_result(response.json(), now)
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         raise XError("OPENAI_REQUEST_UNCERTAIN_NO_AUTO_RETRY") from exc
@@ -160,7 +180,7 @@ async def connection_test():
                 },
             )
         if response.status_code != 200:
-            raise XError("OPENAI_HTTP_" + str(response.status_code), response.status_code)
+            raise response_error(response)
         payload = response.json()
         if payload.get("status") != "completed":
             raise XError("OPENAI_TEST_INCOMPLETE")

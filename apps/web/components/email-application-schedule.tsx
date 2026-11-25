@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useState } from 'react';
 type Schedule = { mode: 'opening' | 'closing' | 'both'; time: string };
 
@@ -104,7 +105,7 @@ export function EmailApplicationSchedule({
         Recipients are addressed separately with private unsubscribe links. Category content is
         generated once and reused in queued batches; recipient addresses are never shared.
       </p>
-      <p role="status">{message}</p>
+      <AdminActionFeedback role="status">{message}</AdminActionFeedback>
     </section>
   );
 }

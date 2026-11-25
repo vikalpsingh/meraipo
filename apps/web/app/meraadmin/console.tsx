@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback, AdminFeedbackBoundary } from '@/components/admin-action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Company, SiteMessage, Advertisement } from '@/lib/types';
 import { human, timestamp } from '@/lib/format';
@@ -231,11 +232,11 @@ export default function Console() {
             Sign in
           </button>
         </form>
-        <p role="alert">{status}</p>
+        <AdminActionFeedback role="alert">{status}</AdminActionFeedback>
       </section>
     );
   return (
-    <>
+    <AdminFeedbackBoundary>
       <div className="section-heading">
         <span>Signed in as {session.email}</span>
         <button
@@ -287,9 +288,7 @@ export default function Console() {
           </button>
         ))}
       </nav>
-      <p className="admin-status" role="status" aria-live="polite">
-        {status}
-      </p>
+      <AdminActionFeedback>{status}</AdminActionFeedback>
       {tab === 'Applicant guides' && <GuideEditor companies={companies} busy={busy} save={save} />}
       {tab === 'Customer feedback' && <FeedbackInbox csrf={session.csrf_token} />}
       {tab === 'Feature releases' && <FeatureControls csrf={session.csrf_token} />}
@@ -761,6 +760,6 @@ export default function Console() {
       {tab === 'Job error log' && <JobErrorLog />}
       {tab === 'X publishing' && <XControlCenter csrf={session.csrf_token} />}
       {tab === 'Email subscribers' && <EmailSubscribers csrf={session.csrf_token} />}
-    </>
+    </AdminFeedbackBoundary>
   );
 }

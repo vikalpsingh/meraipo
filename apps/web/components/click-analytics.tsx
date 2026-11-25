@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useEffect, useState } from 'react';
 
 type Data = {
@@ -78,7 +79,7 @@ export function ClickAnalytics() {
           {busy ? 'Loading…' : 'Refresh'}
         </button>
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error && <AdminActionFeedback role="alert">{error}</AdminActionFeedback>}
       {data && (
         <>
           <div className="click-analytics-totals">

@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback, adminMessage } from './admin-action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { timestamp } from '@/lib/format';
 type Post = {
@@ -124,7 +125,7 @@ export function XControlCenter({ csrf }: { csrf: string }) {
         reminders can publish automatically from public-feed data. Market research requires an
         approved test first.
       </p>
-      <p role="status">{message}</p>
+      <AdminActionFeedback role="status">{message}</AdminActionFeedback>
       <button disabled={busy} onClick={() => void load().catch((e) => setMessage(e.message))}>
         Refresh status
       </button>
@@ -135,7 +136,7 @@ export function XControlCenter({ csrf }: { csrf: string }) {
             {data.connected ? '@' + data.username : 'Not connected'} · Mode:{' '}
             {data.auto_publish ? 'Automatic' : 'Approval required'}
           </p>
-          {data.error && <p role="alert">{data.error}</p>}
+          {data.error && <AdminActionFeedback role="alert">{data.error}</AdminActionFeedback>}
           <div className="job-actions">
             <button disabled={busy || !data.enabled} onClick={() => action('connect')}>
               {data.connected ? 'Reconnect X' : 'Connect @MeraIPO'}
@@ -146,8 +147,10 @@ export function XControlCenter({ csrf }: { csrf: string }) {
           </div>
           <p>
             OpenAI research:{' '}
-            {data.openai_configured ? 'Configured on server' : 'API key required on server'}. No
-            ChatGPT conversation is scraped.
+            {data.openai_configured
+              ? 'Key present on server; access and quota require a successful test'
+              : 'API key required on server'}
+            . No ChatGPT conversation is scraped.
           </p>
           <div className="admin-table-scroll">
             <table>
@@ -415,7 +418,7 @@ export function XControlCenter({ csrf }: { csrf: string }) {
                     </td>
                     <td>
                       {p.status}
-                      <p>{p.error_code}</p>
+                      <p>{adminMessage(p.error_code || '')}</p>
                       <small>
                         Attempts: {p.attempts} · HTTP: {p.api_status || '—'} · Reference:{' '}
                         {p.request_id || '—'}

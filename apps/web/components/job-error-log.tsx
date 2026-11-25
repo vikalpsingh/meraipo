@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 
 import { useEffect, useState } from 'react';
 import { human, timestamp } from '@/lib/format';
@@ -57,7 +58,7 @@ export function JobErrorLog() {
         Latest 50 errors, newest first. Times are IST. Historical errors remain visible after a
         successful retry.
       </p>
-      {message && <p role="status">{message}</p>}
+      {message && <AdminActionFeedback role="status">{message}</AdminActionFeedback>}
       {!message && items.length === 0 && <p>No job errors recorded.</p>}
       <ul className="run-list">
         {items.map((error) => (

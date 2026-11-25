@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 
 import { useState } from 'react';
 import type { FormEvent } from 'react';
@@ -89,7 +90,7 @@ export function OfficialResultsSource({
           <button disabled={busy}>{busy ? 'Saving…' : 'Save approved source'}</button>
         </form>
       )}
-      {message && <p role="status">{message}</p>}
+      {message && <AdminActionFeedback role="status">{message}</AdminActionFeedback>}
     </details>
   );
 }

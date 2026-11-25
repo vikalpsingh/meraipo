@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { human, timestamp } from '@/lib/format';
@@ -121,7 +122,7 @@ export function ResultsConsole({ csrf }: { csrf: string }) {
         Configurable discovery and a rolling 14-day reconciliation. Originals and revisions are
         retained. Unverified figures require review.
       </p>
-      {message && <p role="status">{message}</p>}
+      {message && <AdminActionFeedback role="status">{message}</AdminActionFeedback>}
       {['BSE', 'NSE'].map((exchange) => {
         const s = data.sources.find((x) => x.exchange === exchange);
         return (

@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { human, timestamp } from '@/lib/format';
 import type { JobRun, ScheduledJob } from './job-types';
@@ -152,7 +153,7 @@ export function JobHistory({
           </select>
         </label>
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error && <AdminActionFeedback role="alert">{error}</AdminActionFeedback>}
       {!history ? (
         <p>Loading runs…</p>
       ) : (

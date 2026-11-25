@@ -1,4 +1,5 @@
 'use client';
+import { AdminActionFeedback } from './admin-action-feedback';
 
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -132,7 +133,7 @@ export function BhavcopyConsole({ csrf, companies }: { csrf: string; companies: 
         Configure NSE and BSE run times independently in Jobs &amp; schedules. Original files expire
         after seven days; daily prices and corrections remain available. Prices are unadjusted.
       </p>
-      {message && <p role="status">{message}</p>}
+      {message && <AdminActionFeedback role="status">{message}</AdminActionFeedback>}
       <button className="primary-button" disabled={busy} onClick={() => void perform(load)}>
         Refresh closing-file status
       </button>
