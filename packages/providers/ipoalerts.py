@@ -42,7 +42,9 @@ def normalize(row, observed_at):
         raise ValueError("Unknown status")
     if row.get("typeOfIssue", "IPO") not in (None, "IPO") or row.get("type") == "DEBT":
         return None
-    board = {"EQ": "Mainboard", "SME": "SME", None: "Unknown"}.get(row.get("type"))
+    board = {"EQ": "Mainboard", "Equity": "Mainboard", "SME": "SME", None: "Unknown"}.get(
+        row.get("type")
+    )
     if board is None or (board == "Unknown" and status != "announced"):
         raise ValueError("Unknown security type")
     source = row.get("source")

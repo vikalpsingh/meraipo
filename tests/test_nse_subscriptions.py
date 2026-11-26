@@ -75,7 +75,12 @@ async def test_new_vendor_ipo_categories_publish_together_and_repeat(db, monkeyp
             "test",
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
-                    200, json=response([row()] if request.url.params["status"] == "open" else [])
+                    200,
+                    json=response(
+                        [{**row(), "type": "Equity"}]
+                        if request.url.params["status"] == "open"
+                        else []
+                    ),
                 )
             ),
             sleep=no_sleep,
@@ -84,6 +89,7 @@ async def test_new_vendor_ipo_categories_publish_together_and_repeat(db, monkeyp
 
     async def download(target):
         assert target == url("FIXTURE")
+        assert target.startswith("https://www.nseindia.in/api/ipo-active-category?")
         return json.dumps(payload()).encode()
 
     for _ in range(2):

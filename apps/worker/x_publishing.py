@@ -61,7 +61,12 @@ def daily():
         try:
             return await tick(True)
         finally:
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            finally:
+                from apps.api.cache import client
+
+                await client.aclose()
 
     return asyncio.run(run())
 
@@ -72,6 +77,11 @@ def outbox():
         try:
             return await tick()
         finally:
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            finally:
+                from apps.api.cache import client
+
+                await client.aclose()
 
     return asyncio.run(run())

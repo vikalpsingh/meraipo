@@ -12,7 +12,7 @@ from packages.providers.market import FeedError, Subscriptions
 
 
 def url(symbol):
-    return "https://www.nseindia.com/api/ipo-active-category?" + urlencode({"symbol": symbol})
+    return "https://www.nseindia.in/api/ipo-active-category?" + urlencode({"symbol": symbol})
 
 
 def parse(content, symbol, identity):

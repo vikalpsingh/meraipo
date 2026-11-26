@@ -485,3 +485,41 @@ async def test_unchanged_gmp_still_has_a_fresh_daily_observation(db):
     result = await journey(db, company.slug)
     assert result["gmp"] == 12
     assert result["gmp_timestamp"].startswith("2026-07-21")
+
+
+@pytest.mark.parametrize("committed", [False, True])
+async def test_cache_failure_does_not_leave_orphaned_running_job(db, monkeypatch, committed):
+    from apps.api import cache
+
+    async def broken_commit(session):
+        if committed:
+            await session.commit()
+        raise RuntimeError("Event loop is closed")
+
+    monkeypatch.setattr(cache, "commit_with_invalidation", broken_commit)
+    run = await create_run(db, "sync-ipos", "manual")
+    await run_pipeline(db, run)
+    await db.refresh(run)
+    assert run.status != "RUNNING"
+    assert run.finished_at is not None
+    assert run.error == ("CACHE_INVALIDATION_FAILED" if committed else "CACHE_PUBLICATION_FAILED")
+    assert not await db.scalar(select(m.JobLock).where(m.JobLock.owner == run.id))
+    if not committed:
+        assert run.status == "FAILED"
+        assert run.counters["written"] == 0
+
+
+@pytest.mark.parametrize("symbol", ["FOODLINK", "MAHACOAL", "SHREESIDHI", "WATRANA"])
+async def test_migrated_nse_host_is_allowed_but_arbitrary_redirect_is_not(symbol):
+    from packages.providers.nse_subscriptions import url
+
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, content=b'{"dataList": []}')
+
+    assert await ex.download(url(symbol), transport=httpx.MockTransport(handler))
+    assert calls == [f"https://www.nseindia.in/api/ipo-active-category?symbol={symbol}"]
+    with pytest.raises(FeedError, match="UNAPPROVED_EXCHANGE_URL"):
+        await ex.download("https://www.nseindia.in.evil.example/api/ipo-active-category")

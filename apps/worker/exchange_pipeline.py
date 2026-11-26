@@ -83,6 +83,8 @@ def error(db, run, provider, item, exc):
         "IPOALERTS_RATE_LIMITED": "IPOAlerts rate limit reached. Wait for the provider quota to reset before rerunning.",
         "IPOALERTS_SCHEMA_CHANGED": "IPOAlerts response or pagination metadata failed validation. Review the provider API contract.",
         "IPOALERTS_INVALID_ROW": "The IPOAlerts record failed validation. Review its provider ID and retained raw response.",
+        "CACHE_PUBLICATION_FAILED": "Collected data remains staged, but publication could not commit through Redis cache coordination. Check worker event-loop cleanup and Redis health, then retry the import.",
+        "CACHE_INVALIDATION_FAILED": "Publication committed, but cache invalidation failed. Check Redis health; public reads remain protected by the cache dirty marker and TTL.",
         "IPOALERTS_INVALID_GMP": "The GMP quote has an invalid value or observation timestamp. IPO master data is retained; no zero or fresh timestamp is invented.",
         "TRADING_CALENDAR_REQUIRED": "Configure TRADING_CALENDAR_YEAR and TRADING_HOLIDAYS for the requested trading year. No price date was guessed.",
         "FUTURE_TRADE_DATE": "Choose today or an earlier date for historical closing prices.",
@@ -93,6 +95,7 @@ def error(db, run, provider, item, exc):
         "IPOALERTS_TIME_BUDGET": "IPOAlerts collection reached the time budget. Completed status batches are retained; check plan limits and rerun.",
         "IPOALERTS_UNAVAILABLE": "IPOAlerts was unavailable after bounded retries. Previous published data is retained.",
         "EXCHANGE_HTTP_404": "The exchange URL or dated file was not found. Verify the official endpoint and trading date, then rerun the job.",
+        "EXCHANGE_HTTP_301": "The exchange endpoint moved. NSE_CONSOLIDATED subscriptions require the www.nseindia.in endpoint update in the deployed worker. For other sources, verify the redirect destination before changing configuration.",
         "EXCHANGE_HTTP_403": "The exchange denied access. Verify permitted source access before retrying.",
         "BSE_ACCESS_REDIRECT": "BSE redirected the public IPO API to another page instead of returning data. Verify permitted API access with BSE; previous website data is retained.",
         "BSE_IPO_SCHEMA_CHANGED": "BSE did not return the expected Table list. Review the retained raw response and official field mapping.",
@@ -802,5 +805,25 @@ async def run_pipeline(db, run, download=None):
     await db.execute(delete(m.JobLock).where(m.JobLock.owner == run.id))
     from apps.api.cache import commit_with_invalidation
 
-    await commit_with_invalidation(db)
+    try:
+        await commit_with_invalidation(db)
+    except Exception:
+        # Cache coordination can fail before OR after the database commit. Do not
+        # leave an uncommitted run RUNNING for the orphan watchdog to misdiagnose.
+        await db.rollback()
+        await db.refresh(run)
+        if run.status == "RUNNING":
+            run.status, run.error, run.finished_at = ("FAILED", "CACHE_PUBLICATION_FAILED", m.now())
+            counts["written"] = 0
+            counts["failed"] += 1
+            run.counters = counts
+            error(db, run, "cache", "publication", FeedError("CACHE_PUBLICATION_FAILED"))
+            await db.execute(delete(m.JobLock).where(m.JobLock.owner == run.id))
+            await db.commit()
+        # If already committed, preserve the actual publication outcome. The
+        # dirty marker set before commit protects reads until cache TTL expires.
+        else:
+            error(db, run, "cache", "invalidation", FeedError("CACHE_INVALIDATION_FAILED"))
+            run.error = "CACHE_INVALIDATION_FAILED"
+            await db.commit()
     return run

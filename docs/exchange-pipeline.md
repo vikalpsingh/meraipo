@@ -93,3 +93,17 @@ Financial scans overlap fourteen days, filter tracked companies before downloadi
 Public availability and redistribution permission are separate, as noted in the supplied brief; this implementation does not grant exchange display rights.
 
 `tests/test_exchange_pipeline.py` covers single-job staging/publication, repeated runs, source failure isolation, NSE preference/BSE fallback, daily subscription joins, exchange-total comparisons, BSE HTML parsing, financial XML ingestion, scheduling and rejected-record recovery. Migration tests preserve existing IPO data and check schema/model agreement. Desktop/mobile Playwright tests cover the company popup, daily history, percentage display, error recovery, keyboard focus, navigation and admin controls. Fixture data stays isolated from the Docker application database.
+
+## IPO sync incident — 26 November 2026
+
+Production run `2efd55e2-fff6-4922-bd2e-31146eb1f098` started at 12:30 IST. The retained Celery result shows it crashed at 12:31:15 IST inside `commit_with_invalidation`: the shared async Redis connection belonged to an event loop already closed by an earlier X task. The 12:41 `WORKER_TIMEOUT` was orphan detection, not an eleven-minute provider request. Collection was staged; publication did not complete.
+
+Fixes:
+- X daily/outbox tasks close their shared Redis connections before closing each task's event loop, including failure paths.
+- Pipeline cache failures now record an immediate actionable outcome. Before-commit failures retain staging and roll back publication; after-commit failures preserve the publication outcome.
+- IPOAlerts record `1215465407` uses `type: Equity`. This supported mainboard alias is accepted alongside `EQ`; unknown types still fail validation.
+- NSE consolidated subscriptions now use `https://www.nseindia.in/api/ipo-active-category?symbol=...`. The old `.com` endpoint returns HTTP 301 to that exact endpoint. Arbitrary redirects remain disabled.
+
+Read-only production-network verification returned HTTP 200 and parsable data for FOODLINK, MAHACOAL, SHREESIDHI and WATRANA. Source timestamps are preserved. Zero offered shares produce an unavailable multiple, never fabricated subscription ratios. No IPOAlerts quota was consumed for diagnosis: the retained raw response was inspected.
+
+Deployment/recovery: rebuild and recreate API, worker and scheduler from the fixed revision using the existing production Compose configuration and private environment file. Restarting only API will not fix worker connection reuse. No database migration, timeout increase, frequency change or new API parameters are required. Then run **IPO, subscription & GMP sync → Run now** once and inspect its new run ID, counters, subscription source dates and public company pages. Keep the historical failed run for audit; do not change it to SUCCESS. This change does not itself deploy or rerun production.

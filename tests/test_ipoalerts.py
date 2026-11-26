@@ -478,20 +478,42 @@ async def test_upcoming_mahanadi_on_later_page_is_not_missed():
         items = []
         if status == "upcoming":
             item = row()
-            item.update(id=f"upcoming-{page}", status="upcoming",
-                        slug=f"upcoming-{page}", symbol=f"FIXTURE{page}",
-                        name="Mahanadi Coalfields Limited" if page == 2 else "Other Fixture Limited",
-                        startDate="2026-11-19", endDate="2026-11-23",
-                        listingDate="2026-11-27")
+            item.update(
+                id=f"upcoming-{page}",
+                status="upcoming",
+                slug=f"upcoming-{page}",
+                symbol=f"FIXTURE{page}",
+                name="Mahanadi Coalfields Limited" if page == 2 else "Other Fixture Limited",
+                startDate="2026-11-19",
+                endDate="2026-11-23",
+                listingDate="2026-11-27",
+            )
             items = [item]
-        return httpx.Response(200, json=response(
-            items, page, 2 if status == "upcoming" else 1,
-            2 if status == "upcoming" else 0))
+        return httpx.Response(
+            200,
+            json=response(
+                items, page, 2 if status == "upcoming" else 1, 2 if status == "upcoming" else 0
+            ),
+        )
 
-    batches = [batch async for batch in IPOAlerts(
-        "fixture-key", page_size=10, transport=httpx.MockTransport(handler), sleep=no_sleep
-    ).batches(time.monotonic() + 60)]
+    batches = [
+        batch
+        async for batch in IPOAlerts(
+            "fixture-key", page_size=10, transport=httpx.MockTransport(handler), sleep=no_sleep
+        ).batches(time.monotonic() + 60)
+    ]
     issues = [value for batch in batches for kind, value in batch.records if kind == "ipos"]
     assert ("upcoming", 2) in calls and ("announced", 1) in calls
     matches = [item for item in issues if item["issue"]["name"] == "Mahanadi Coalfields Limited"]
     assert len(matches) == 1 and matches[0]["issue"]["status"] == "UPCOMING"
+
+
+@pytest.mark.parametrize("security_type", ["EQ", "Equity", "SME"])
+def test_ipoalerts_equity_alias(security_type):
+    value = normalize({**row(), "type": security_type}, datetime.now(UTC))
+    assert value["issue"]["board"] == ("SME" if security_type == "SME" else "Mainboard")
+
+
+def test_unknown_security_type_is_still_rejected():
+    with pytest.raises(ValueError, match="Unknown security type"):
+        normalize({**row(), "type": "unexpected"}, datetime.now(UTC))

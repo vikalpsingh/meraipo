@@ -21,6 +21,7 @@ from packages.providers.market import Eod, FeedError, Issue, Subscriptions
 VERSION = "exchange-v1"
 HOSTS = {
     "www.nseindia.com",
+    "www.nseindia.in",
     "nsearchives.nseindia.com",
     "archives.nseindia.com",
     "www.bseindia.com",
