@@ -24,6 +24,7 @@ it('saves only the selected schedule in IST with CSRF', async () => {
   }));
   vi.stubGlobal('fetch', fetcher);
   render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Market updates' }));
   const clock = await screen.findByLabelText('Daily market update · OpenAI time in IST');
   fireEvent.change(clock, { target: { value: '08:30' } });
   fireEvent.click(screen.getByLabelText('Enable Daily market update · OpenAI'));
@@ -64,6 +65,7 @@ it('renders nested evidence safely and provides an authenticated image preview',
     }),
   );
   render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Market updates' }));
   expect(await screen.findByRole('link', { name: 'Preview IPO image ↗' })).toHaveAttribute(
     'href',
     '/api/v1/admin/x/draft/image',
@@ -98,8 +100,8 @@ it('previews manual text and saves only a draft with CSRF', async () => {
   );
   expect(fetcher.mock.calls.some(([url]) => url.endsWith('/publish'))).toBe(false);
   expect(
-    screen.getByRole('button', { name: "Get today's market-opening draft · OpenAI" }),
-  ).toBeDisabled();
+    screen.queryByRole('button', { name: "Get today's market-opening draft · OpenAI" }),
+  ).not.toBeInTheDocument();
 });
 
 it('requires response review before queuing GPT text to X', async () => {
@@ -116,6 +118,7 @@ it('requires response review before queuing GPT text to X', async () => {
   }));
   vi.stubGlobal('fetch', fetcher);
   render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Market updates' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Test OpenAI connection' }));
   expect(await screen.findByText('Integration test only.')).toBeInTheDocument();
   const publish = screen.getByRole('button', { name: 'Publish reviewed GPT response to X' });
@@ -166,6 +169,7 @@ it('generates a market content test with the schedule disabled and shows review 
   }));
   vi.stubGlobal('fetch', fetcher);
   render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Market updates' }));
   fireEvent.click(
     await screen.findByRole('button', { name: "1. Generate today's market update · test" }),
   );
@@ -202,5 +206,37 @@ it('submits the chosen currently open IPO for an image test', async () => {
         body: JSON.stringify({ kind: 'IPO_OPENING', ipo_id: 'open-ipo' }),
       }),
     ),
+  );
+});
+
+it('separates publishing tabs and submits a company results test', async () => {
+  const fetcher = vi
+    .fn()
+    .mockImplementation(async (_url, options) => ({
+      ok: true,
+      json: async () =>
+        options?.method === 'POST'
+          ? { message: 'Results saved' }
+          : { ...overview, openai_configured: true },
+    }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<XControlCenter csrf="csrf-token" />);
+  expect(await screen.findByRole('region', { name: 'IPO publishing tab' })).toBeInTheDocument();
+  expect(screen.queryByLabelText('Company name or exchange symbol')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Quarterly results' }));
+  fireEvent.change(screen.getByLabelText('Company name or exchange symbol'), {
+    target: { value: 'Example Ltd' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Generate company results test' }));
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/v1/admin/x/results-test',
+      expect.objectContaining({ body: JSON.stringify({ company: 'Example Ltd' }) }),
+    ),
+  );
+  expect(screen.queryByLabelText('Currently open IPO for test')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Quarterly results' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
   );
 });

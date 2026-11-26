@@ -2777,3 +2777,12 @@ body:has(.company-preview[open]) {
 .admin-action-feedback-slot { display:block; flex-basis:100%; grid-column:1 / -1; min-width:0; }
 .admin-action-feedback { margin:10px 0; padding:10px 14px; border-left:3px solid #168273; border-radius:6px; background:#eff8f5; color:#173f38; white-space:pre-wrap; overflow-wrap:anywhere; font-weight:400; }
 .admin-action-feedback[role=alert] { border-color:#b15d1a; background:#fff7ec; color:#723d14; }
+
+.x-publishing-panel .screen-tabs [aria-pressed='true'] { background:#0b7668; color:#fff; border-color:#0b7668; }
+.x-publishing-panel .screen-tabs button { min-height:44px; }
+.x-results-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 12px; margin:18px 0; }
+.x-results-form label { grid-column:1 / -1; font-weight:600; }
+.x-results-form input { min-width:0; min-height:44px; padding:10px 12px; border:1px solid #a6bdb6; border-radius:8px; font:inherit; }
+.x-results-form button { min-height:44px; }
+.x-publishing-panel dd { overflow-wrap:anywhere; white-space:pre-wrap; }
+@media(max-width:640px) { .x-results-form { grid-template-columns:1fr; } }

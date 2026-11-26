@@ -811,3 +811,211 @@ async def test_successful_approved_market_test_unlocks_opt_in(
     response = await admin_client.post("/api/v1/admin/x/market-auto", json={"enabled": True})
     assert response.status_code == 200
     assert service.schedules(await service.account(db))["MARKET_DAILY"]["auto_publish"] is True
+
+
+def result_example(now, **changes):
+    from packages.providers.results_research import Result
+
+    data = dict(
+        company="Example Limited",
+        symbol="EXAMPLE",
+        declared_at=now,
+        current_start="2026-07-01",
+        current_end="2026-09-30",
+        previous_start="2026-04-01",
+        previous_end="2026-06-30",
+        current_basis="consolidated",
+        previous_basis="consolidated",
+        unit="INR crore",
+        sales_current="121",
+        sales_previous="100",
+        profit_current="25",
+        profit_previous="20",
+        sources=["https://www.bseindia.com/results/example.pdf"],
+    )
+    return Result(**{**data, **changes})
+
+
+@pytest.mark.parametrize(
+    "sales,profit,expected",
+    [("121", "25", True), ("120", "25", False), ("121", "24", False), ("100", "20", False)],
+)
+def test_results_strict_growth_threshold(sales, profit, expected):
+    from packages.providers.results_research import evaluate
+
+    now = datetime(2026, 11, 17, 10, 0, tzinfo=timezone.utc)
+    item = result_example(now, sales_current=sales, profit_current=profit)
+    assert evaluate(item, now)[2] is expected
+
+
+@pytest.mark.parametrize(
+    "changes,code",
+    [
+        ({"profit_previous": "0"}, "RESULT_NON_POSITIVE_BASE"),
+        ({"profit_previous": "-1"}, "RESULT_NON_POSITIVE_BASE"),
+        ({"sales_current": "NaN"}, "RESULT_NON_POSITIVE_BASE"),
+        ({"previous_basis": "standalone"}, "RESULT_BASIS_MISMATCH"),
+        ({"current_start": "2026-04-01"}, "RESULT_QUARTERS_NOT_COMPARABLE"),
+        ({"previous_end": "2026-05-31"}, "RESULT_QUARTERS_NOT_COMPARABLE"),
+    ],
+)
+def test_results_reject_incomparable_or_invalid_values(changes, code):
+    from packages.providers.results_research import evaluate
+
+    now = datetime(2026, 11, 17, 10, 0, tzinfo=timezone.utc)
+    with pytest.raises(x_api.XError, match=code):
+        evaluate(result_example(now, **changes), now)
+
+
+async def test_results_scan_queues_only_qualifying_today_and_deduplicates(
+    db, draft_setup, monkeypatch
+):
+    from packages.providers import results_research as provider
+
+    _, _, account = draft_setup
+    account.auto_publish = True
+    account.schedules = {"RESULTS_DAILY": {"enabled": True, "time": "08:45", "auto_publish": True}}
+    await db.commit()
+    research = AsyncMock(
+        return_value=provider.Results(
+            items=[
+                result_example(m.now()),
+                result_example(m.now(), company="Low Ltd", symbol="LOW", profit_current="24"),
+            ],
+            reason="",
+        )
+    )
+    monkeypatch.setattr(provider, "research", research)
+    rows = await service.generate_results(db)
+    assert rows[0].status == "SCANNED"
+    assert rows[1].status == "QUEUED" and rows[2].status == "SKIPPED"
+    assert "Sales +21.00% QoQ | PAT +25.00% QoQ" in rows[1].content
+    await service.validate_post(db, rows[1])
+    assert (await service.generate_results(db))[0].id == rows[0].id
+    assert research.await_count == 1
+    account.schedules = {"RESULTS_DAILY": {"enabled": False}}
+    await db.commit()
+    with pytest.raises(x_api.XError, match="POST_TYPE_DISABLED"):
+        await service.validate_post(db, rows[1])
+
+
+async def test_named_results_test_always_needs_approval_and_matches_company(
+    db, draft_setup, monkeypatch
+):
+    from packages.providers import results_research as provider
+
+    _, _, account = draft_setup
+    account.auto_publish = True
+    await db.commit()
+    monkeypatch.setattr(
+        provider,
+        "research",
+        AsyncMock(return_value=provider.Results(items=[result_example(m.now())], reason="")),
+    )
+    rows = await service.generate_results(db, company="EXAMPLE", manual=True)
+    assert rows[1].kind == "RESULTS_TEST" and rows[1].status == "DRAFT"
+    await service.validate_post(db, rows[1])
+    mismatch = await service.generate_results(db, company="Different Company", manual=True)
+    assert len(mismatch) == 1 and mismatch[0].evidence["post_ids"] == []
+
+
+def test_results_today_declaration_uses_ist_date():
+    from packages.providers.results_research import evaluate
+
+    now = datetime(2026, 11, 17, 20, 0, tzinfo=timezone.utc)
+    yesterday = result_example(now - timedelta(hours=6))
+    with pytest.raises(x_api.XError, match="RESULT_NOT_IN_DECLARATION_WINDOW"):
+        evaluate(yesterday, now)
+    assert evaluate(yesterday, now, today_only=False)[2]
+
+
+async def test_results_provider_rejects_unretrieved_source(monkeypatch):
+    import httpx
+
+    from packages.providers import results_research as provider
+
+    monkeypatch.setattr(settings(), "openai_api_key", SecretStr("test"))
+    now = datetime(2026, 11, 17, 10, 0, tzinfo=timezone.utc)
+    result = provider.Results(items=[result_example(now)], reason="")
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    client = Client()
+    client.post = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": result.model_dump_json()}],
+                    }
+                ],
+            },
+        )
+    )
+    monkeypatch.setattr(provider.httpx, "AsyncClient", lambda **kwargs: client)
+    with pytest.raises(x_api.XError, match="RESULT_SOURCE_NOT_VERIFIED"):
+        await provider.research(now)
+
+
+async def test_results_admin_workflow_and_automation_gate(
+    admin_client, db, draft_setup, monkeypatch
+):
+    from contextlib import asynccontextmanager
+
+    from apps.api import x_routes
+    from packages.providers import results_research as provider
+
+    @asynccontextmanager
+    async def lock():
+        yield
+
+    monkeypatch.setattr(service, "operation_lock", lock)
+    monkeypatch.setattr(x_routes, "configured", lambda: settings())
+    monkeypatch.setattr(
+        provider,
+        "research",
+        AsyncMock(return_value=provider.Results(items=[result_example(m.now())], reason="")),
+    )
+    assert (
+        await admin_client.post("/api/v1/admin/x/results-auto", json={"enabled": True})
+    ).status_code == 409
+    response = await admin_client.post("/api/v1/admin/x/results-test", json={"company": "EXAMPLE"})
+    assert response.status_code == 200
+    row = await db.scalar(select(m.XPost).where(m.XPost.kind == "RESULTS_TEST"))
+    assert row.status == "DRAFT"
+    assert (await admin_client.post(f"/api/v1/admin/x/{row.id}/approve")).status_code == 200
+    assert (await admin_client.post(f"/api/v1/admin/x/{row.id}/publish")).status_code == 200
+    await db.refresh(row)
+    row.status = "PUBLISHED"
+    await db.commit()
+    assert (
+        await admin_client.post("/api/v1/admin/x/results-auto", json={"enabled": True})
+    ).status_code == 200
+    state = service.schedules(await service.account(db))
+    assert state["RESULTS_DAILY"]["auto_publish"] is True
+    assert state["RESULTS_DAILY"]["enabled"] is False
+
+
+async def test_results_company_tests_have_daily_cap(db, draft_setup, monkeypatch):
+    for number in range(5):
+        db.add(
+            m.XPost(
+                kind="RESULTS_TEST_SCAN",
+                trading_date=m.now().date(),
+                dedupe_key=f"reserved-test-{number}",
+                status="BLOCKED",
+                content="",
+                evidence={},
+            )
+        )
+    await db.commit()
+    with pytest.raises(x_api.XError, match="RESULT_TEST_DAILY_LIMIT"):
+        await service.generate_results(db, company="Sixth company", manual=True)

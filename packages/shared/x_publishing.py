@@ -25,6 +25,7 @@ DEFAULT_SCHEDULES = {
     "MARKET_DAILY": {"enabled": False, "time": "08:45", "auto_publish": False},
     "IPO_OPENING": {"enabled": False, "time": "09:00"},
     "IPO_CLOSING": {"enabled": False, "time": "09:15"},
+    "RESULTS_DAILY": {"enabled": False, "time": "18:30", "auto_publish": False},
 }
 
 
@@ -58,9 +59,13 @@ async def validate_post(db, row):
     now = m.now()
     if row.trading_date != now.astimezone(IST).date():
         raise x_api.XError("DRAFT_EXPIRED")
-    if row.kind not in ("MANUAL", "MARKET_DAILY", "MARKET_TEST") and not trading_day(
-        await load_market_settings(db), row.trading_date
-    ):
+    if row.kind not in (
+        "MANUAL",
+        "MARKET_DAILY",
+        "MARKET_TEST",
+        "RESULTS_POST",
+        "RESULTS_TEST",
+    ) and not trading_day(await load_market_settings(db), row.trading_date):
         raise x_api.XError("NON_TRADING_DAY")
     if row.kind in ("MARKET_DAILY", "MARKET_TEST"):
         trading_day(await load_market_settings(db), row.trading_date)  # Validate calendar coverage.
@@ -78,6 +83,15 @@ async def validate_post(db, row):
         # Evidence is model-selected; automation requires a separate tested opt-in.
         if not row.evidence.get("facts"):
             raise x_api.XError("AI_INSUFFICIENT_EVIDENCE")
+    elif row.kind in ("RESULTS_POST", "RESULTS_TEST"):
+        from packages.providers.results_research import Result, evaluate, post_text
+
+        if row.kind == "RESULTS_POST" and not schedules(a)["RESULTS_DAILY"]["enabled"]:
+            raise x_api.XError("POST_TYPE_DISABLED")
+        item = Result.model_validate(row.evidence["result"])
+        sales, profit, eligible = evaluate(item, now, today_only=row.kind == "RESULTS_POST")
+        if not eligible or post_text(item, sales, profit) != row.content:
+            raise x_api.XError("RESULT_THRESHOLD_OR_CONTENT_CHANGED")
     elif row.kind == "IPO_TEST":
         text, _ = await public_ipo_snapshot(db, row.evidence.get("ipo_id"), current=True)
         if text != row.content or await quote_key(db, row.evidence["ipo_id"]) != row.evidence.get(
@@ -125,6 +139,8 @@ async def generate_scheduled(db, kind, manual=False):
     config = schedules(a)[kind]
     if not config["enabled"] or (not manual and not due(config, local)):
         return []
+    if kind == "RESULTS_DAILY":
+        return await generate_results(db, manual=manual)
     is_trading = trading_day(await load_market_settings(db), local.date())
     if local.weekday() >= 5 or (kind != "MARKET_DAILY" and not is_trading):
         return []
@@ -237,6 +253,116 @@ async def assign_content(db, row, text, evidence):
         }
         raise error
     row.content_hash = digest
+
+
+async def generate_results(db, company=None, manual=False):
+    from packages.providers import results_research as provider
+
+    def normalized(value):
+        return re.sub(r"[^a-z0-9]", "", re.sub(r"\b(limited|ltd)\b", "", value.lower()))
+
+    now = m.now()
+    day = now.astimezone(IST).date()
+    scope = hashlib.sha256(normalized(company).encode()).hexdigest()[:32] if company else "today"
+    scan_key = f"RESULTS_SCAN:{day}:{scope}"
+    prior = await db.scalar(select(m.XPost).where(m.XPost.dedupe_key == scan_key))
+    if prior:
+        return [prior]  # Includes interrupted and failed requests: never silently charge twice.
+    if company:
+        tests = await db.scalar(
+            select(func.count())
+            .select_from(m.XPost)
+            .where(m.XPost.kind == "RESULTS_TEST_SCAN", m.XPost.trading_date == day)
+        )
+        if tests >= 5:
+            raise x_api.XError("RESULT_TEST_DAILY_LIMIT")
+    scan = m.XPost(
+        kind="RESULTS_TEST_SCAN" if company else "RESULTS_SCAN",
+        trading_date=day,
+        dedupe_key=scan_key,
+        status="GENERATING",
+        content="",
+        evidence={"requested_company": company},
+    )
+    db.add(scan)
+    await db.commit()
+    try:
+        result = await provider.research(now, company)
+        a = await account(db)
+        output = []
+        seen = set()
+        # Latest quarter per symbol, prefer consolidated when both are returned.
+        items = sorted(
+            result.items,
+            key=lambda i: (i.current_end, i.current_basis == "consolidated"),
+            reverse=True,
+        )
+        for item in items:
+            symbol = normalized(item.symbol)
+            if symbol in seen:
+                continue
+            if company and normalized(company) not in (normalized(item.company), symbol):
+                continue
+            seen.add(symbol)
+            kind = "RESULTS_TEST" if company else "RESULTS_POST"
+            key = f"{kind}:{symbol}:{item.current_end}"
+            existing = await db.scalar(select(m.XPost).where(m.XPost.dedupe_key == key))
+            if existing:
+                output.append(existing)
+                continue
+            row = m.XPost(
+                kind=kind,
+                trading_date=day,
+                dedupe_key=key,
+                content="",
+                status="SKIPPED",
+                evidence={
+                    "result": item.model_dump(mode="json"),
+                    "generated_at": now.isoformat(),
+                    "scan_id": scan.id,
+                },
+            )
+            db.add(row)
+            await db.flush()
+            try:
+                sales, profit, eligible = provider.evaluate(item, now, today_only=not company)
+                row.evidence = {
+                    **row.evidence,
+                    "sales_qoq_pct": str(sales),
+                    "profit_qoq_pct": str(profit),
+                }
+                if not eligible:
+                    row.error_code = "RESULT_BELOW_STRICT_20_PERCENT_THRESHOLDS"
+                else:
+                    text = provider.post_text(item, sales, profit)
+                    if weighted_length(text) > 280:
+                        raise x_api.XError("DRAFT_TOO_LONG")
+                    await assign_content(db, row, text, row.evidence)
+                    auto = (
+                        not manual
+                        and not company
+                        and a.auto_publish
+                        and schedules(a)["RESULTS_DAILY"]["auto_publish"]
+                    )
+                    row.status = "QUEUED" if auto else "DRAFT"
+            except x_api.XError as exc:
+                row.status, row.error_code = "BLOCKED", exc.code
+            output.append(row)
+        scan.status = "SCANNED"
+        scan.evidence = {
+            **scan.evidence,
+            "reason": result.reason or ("No matching sourced results found" if not output else ""),
+            "post_ids": [r.id for r in output],
+            "companies_returned": len(result.items),
+            "qualified": sum(r.status in ("DRAFT", "QUEUED", "PUBLISHED") for r in output),
+            "coverage": "At most 10 researched companies; not an exhaustive exchange feed",
+        }
+        await db.commit()
+        return [scan, *output]
+    except x_api.XError as exc:
+        scan.status, scan.error_code = "BLOCKED", exc.code
+        await db.commit()
+        return [scan]
 
 
 async def generate_test(db, kind, ipo_id=None):
@@ -514,11 +640,15 @@ async def publish(db, key):
     if not row or row.status not in ("APPROVED", "QUEUED"):
         raise x_api.XError("APPROVAL_REQUIRED")
     if not row.approved_at and (
-        row.kind in ("MANUAL", "MARKET_TEST", "IPO_TEST")
+        row.kind in ("MANUAL", "MARKET_TEST", "IPO_TEST", "RESULTS_TEST")
         or not a.auto_publish
         or (
             row.kind == "MARKET_DAILY"
             and not schedules(a)["MARKET_DAILY"].get("auto_publish", False)
+        )
+        or (
+            row.kind == "RESULTS_POST"
+            and not schedules(a)["RESULTS_DAILY"].get("auto_publish", False)
         )
     ):
         raise x_api.XError("APPROVAL_REQUIRED")

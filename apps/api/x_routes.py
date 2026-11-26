@@ -210,7 +210,7 @@ class AutoInput(BaseModel):
 
 
 class ScheduleInput(BaseModel):
-    kind: Literal["MARKET_DAILY", "IPO_OPENING", "IPO_CLOSING"]
+    kind: Literal["MARKET_DAILY", "IPO_OPENING", "IPO_CLOSING", "RESULTS_DAILY"]
     enabled: StrictBool
     time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
@@ -258,6 +258,67 @@ async def market_auto(data: AutoInput, auth=Depends(admin), db=Depends(get_sessi
 
 class GenerateInput(BaseModel):
     kind: Literal["MARKET_DAILY", "IPO_OPENING", "IPO_CLOSING"]
+
+
+class ResultsTestInput(BaseModel):
+    company: str = Field(min_length=2, max_length=120)
+
+
+@router.post("/results-test")
+async def results_test(data: ResultsTestInput, auth=Depends(admin), db=Depends(get_session)):
+    configured()
+    company = data.company.strip()
+    if len(company) < 2:
+        raise HTTPException(422, "Enter a company name or exchange symbol.")
+    async with service.operation_lock():
+        rows = await service.generate_results(db, company=company, manual=True)
+        audit(db, auth, "results_test", rows[0].id)
+        await db.commit()
+    return {
+        "message": rows[0].error_code
+        or "Results research saved. Review the scan and company rows below; only companies passing both strict growth thresholds can be published."
+    }
+
+
+@router.post("/results-generate")
+async def results_generate(auth=Depends(admin), db=Depends(get_session)):
+    configured()
+    async with service.operation_lock():
+        rows = await service.generate_results(db, manual=True)
+        audit(db, auth, "results_today", rows[0].id)
+        await db.commit()
+    return {
+        "message": rows[0].error_code
+        or "Today's results scan loaded. Review company drafts below. This action does not publish automatically."
+    }
+
+
+@router.post("/results-auto")
+async def results_auto(data: AutoInput, auth=Depends(admin), db=Depends(get_session)):
+    async with service.operation_lock():
+        a = await service.account(db)
+        if data.enabled:
+            configured()
+            if not a.tokens or not await db.scalar(
+                select(m.XPost.id)
+                .where(
+                    m.XPost.kind.in_(["RESULTS_POST", "RESULTS_TEST"]),
+                    m.XPost.status == "PUBLISHED",
+                    m.XPost.approved_at.is_not(None),
+                )
+                .limit(1)
+            ):
+                raise HTTPException(
+                    409, "First successfully publish an approved quarterly-results test or post."
+                )
+        value = service.schedules(a)
+        value["RESULTS_DAILY"]["auto_publish"] = data.enabled
+        a.schedules = value
+        audit(db, auth, "results_auto_on" if data.enabled else "results_auto_off")
+        await db.commit()
+    return {
+        "message": "Results automation saved. Enable its schedule and the global publishing switch to send qualifying posts automatically."
+    }
 
 
 class ContentTestInput(BaseModel):
