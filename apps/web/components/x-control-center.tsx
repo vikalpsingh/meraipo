@@ -22,6 +22,7 @@ type Post = {
 type Schedule = { enabled: boolean; time: string; auto_publish?: boolean };
 type Kind = 'MARKET_DAILY' | 'IPO_OPENING' | 'IPO_CLOSING';
 type Overview = {
+  test_ipos?: { id: string; name: string }[];
   schedules: Record<Kind, Schedule>;
   openai_configured: boolean;
   enabled: boolean;
@@ -34,6 +35,7 @@ type Overview = {
   posts: Post[];
 };
 export function XControlCenter({ csrf }: { csrf: string }) {
+  const [contentTestId, setContentTestId] = useState<string | null>(null);
   const [manualText, setManualText] = useState('');
   const [openaiTest, setOpenaiTest] = useState<{
     text: string;
@@ -86,6 +88,7 @@ export function XControlCenter({ csrf }: { csrf: string }) {
       const result = await r.json();
       if (!r.ok) throw new Error(result.error?.message || result.detail || 'X action failed.');
       if (result.review) setReview(result.review);
+      if (result.test_id) setContentTestId(result.test_id);
       if (result.openai_test) {
         setOpenaiTest(result.openai_test);
         setTestReviewed(false);
@@ -121,7 +124,7 @@ export function XControlCenter({ csrf }: { csrf: string }) {
     <section className="panel x-publishing-panel">
       <h2>X publishing · @MeraIPO</h2>
       <p>
-        Trading-day market research and opening-day IPO posts. Times are India time (IST). IPO
+        Weekday market research and opening/closing IPO posts. Times are India time (IST). IPO
         reminders can publish automatically from public-feed data. Market research requires an
         approved test first.
       </p>
@@ -154,7 +157,10 @@ export function XControlCenter({ csrf }: { csrf: string }) {
           </p>
           <div className="admin-table-scroll">
             <table>
-              <caption>Schedules · trading days only · one-hour catch-up window</caption>
+              <caption>
+                Schedules · IST · one-hour catch-up window. Market: weekdays including holiday
+                briefs; IPOs: trading days.
+              </caption>
               <thead>
                 <tr>
                   <th>Post type</th>
@@ -171,11 +177,74 @@ export function XControlCenter({ csrf }: { csrf: string }) {
                     value={data.schedules[kind] || { enabled: false, time: '09:15' }}
                     busy={busy}
                     save={action}
+                    ipos={data.test_ipos || []}
+                    openaiConfigured={data.openai_configured}
                   />
                 ))}
               </tbody>
             </table>
           </div>
+          {contentTestId &&
+            data.posts
+              .filter((post) => post.id === contentTestId)
+              .map((post) => (
+                <section className="panel" aria-label="Generated content test" key={post.id}>
+                  <h3>
+                    2. Review generated{' '}
+                    {post.kind === 'MARKET_TEST' ? 'market update' : 'current IPO post'}
+                  </h3>
+                  <p>Status: {post.status}. Generation never publishes automatically.</p>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>
+                    {post.content ||
+                      adminMessage(post.error_code || 'Generation has not completed.')}
+                  </p>
+                  {post.has_image && (
+                    <a
+                      href={'/api/v1/admin/x/' + post.id + '/image'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Review generated IPO image ↗
+                    </a>
+                  )}
+                  <details>
+                    <summary>Private source evidence and skip reason</summary>
+                    <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                      {JSON.stringify(post.evidence, null, 2)}
+                    </pre>
+                  </details>
+                  <p>
+                    3. Approve the exact text and image, then publish. This sends a real public post
+                    to @MeraIPO.
+                  </p>
+                  <button
+                    disabled={busy || post.status !== 'DRAFT'}
+                    onClick={() => action(post.id + '/approve')}
+                  >
+                    Approve test content
+                  </button>{' '}
+                  <button
+                    disabled={busy || !data.connected || post.status !== 'APPROVED'}
+                    onClick={() => action(post.id + '/publish')}
+                  >
+                    Publish test content to X
+                  </button>
+                  {post.post_id && (
+                    <a
+                      href={'https://x.com/MeraIPO/status/' + post.post_id}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View published test ↗
+                    </a>
+                  )}
+                  <p>
+                    4. After verifying the published result, save the schedules and enable
+                    automation below. Market automation accepts a successfully published approved
+                    market test; manual text and connection tests do not qualify.
+                  </p>
+                </section>
+              ))}
           <section className="panel" aria-label="OpenAI connection test">
             <h3>Test OpenAI connection and GPT response</h3>
             <p>
@@ -264,8 +333,9 @@ export function XControlCenter({ csrf }: { csrf: string }) {
           </section>
           <p>
             Research starts at the scheduled time, not an exact publication deadline. One market
-            research request per day; incomplete or interrupted research is not automatically
-            charged again. Review source dates and all figures before approval.
+            scheduled research request plus one optional content test per IST day; incomplete or
+            interrupted research is not automatically charged again. Review source dates and all
+            figures before approval.
           </p>
           {review && (
             <section aria-label="Pulled content for review" className="panel">
@@ -375,11 +445,15 @@ export function XControlCenter({ csrf }: { csrf: string }) {
                       <strong>
                         {p.kind === 'MANUAL'
                           ? 'Manual admin post'
-                          : p.kind === 'MARKET_DAILY'
-                            ? 'Daily market update'
-                            : p.kind === 'IPO_CLOSING'
-                              ? 'IPO closing day'
-                              : 'IPO opening / brief'}
+                          : p.kind === 'MARKET_TEST'
+                            ? 'Market content test'
+                            : p.kind === 'IPO_TEST'
+                              ? 'Current IPO content test'
+                              : p.kind === 'MARKET_DAILY'
+                                ? 'Daily market update'
+                                : p.kind === 'IPO_CLOSING'
+                                  ? 'IPO closing day'
+                                  : 'IPO opening / brief'}
                       </strong>
                       {p.has_image && (
                         <a
@@ -480,12 +554,17 @@ function ScheduleRow({
   value,
   busy,
   save,
+  ipos,
+  openaiConfigured,
 }: {
   kind: Kind;
   value: Schedule;
   busy: boolean;
   save: (path: string, body?: object) => Promise<void>;
+  ipos: { id: string; name: string }[];
+  openaiConfigured: boolean;
 }) {
+  const [testIpo, setTestIpo] = useState('');
   const [enabled, setEnabled] = useState(value.enabled);
   const [time, setTime] = useState(value.time);
   const label =
@@ -498,6 +577,50 @@ function ScheduleRow({
     <tr>
       <td>{label}</td>
       <td>
+        {kind === 'MARKET_DAILY' && (
+          <div>
+            <button
+              disabled={busy || !openaiConfigured}
+              onClick={() => save('content-test', { kind })}
+            >
+              1. Generate today&apos;s market update · test
+            </button>
+            <p>
+              Paid research: one test per IST day, separate from the scheduled request. Uses the
+              market prompt, not a ChatGPT chat. Weekends or insufficient core data return
+              SKIP_POST. Tests work with the schedule disabled.
+            </p>
+          </div>
+        )}
+        {kind === 'IPO_OPENING' && (
+          <div>
+            <label>
+              Currently open IPO for test
+              <select
+                value={testIpo}
+                onChange={(event) => setTestIpo(event.target.value)}
+                disabled={busy}
+              >
+                <option value="">Choose an IPO</option>
+                {ipos.map((ipo) => (
+                  <option key={ipo.id} value={ipo.id}>
+                    {ipo.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              disabled={busy || !testIpo}
+              onClick={() => save('content-test', { kind, ipo_id: testIpo })}
+            >
+              1. Generate selected IPO content and image · test
+            </button>
+            <p>
+              Uses an open IPO even after its opening day. Test text and image say open for
+              subscription. Scheduled posts still use the actual opening date.
+            </p>
+          </div>
+        )}
         <input
           aria-label={'Enable ' + label}
           type="checkbox"

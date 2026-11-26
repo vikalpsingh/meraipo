@@ -213,3 +213,11 @@ draft, approves it, and queues it through the existing publisher. Failed interme
 steps stop the sequence. Duplicate, length, identity and spending checks still apply.
 This test does not unlock the successful MARKET_DAILY approval requirement. Never
 paste credentials into test text; credentials remain exclusively on the server.
+
+## Updated market prompt and content tests
+See [Test market and current-IPO content](x-content-testing.md) for the current flow.
+This supersedes the earlier source-link-in-post and trading-day-only market behavior:
+public market text has no source links; evidence stays in admin, weekdays include
+holiday briefings, and MARKET_TEST has a separate once-per-day research allowance.
+An approved, successfully published MARKET_TEST also qualifies for market automation.
+IPO_TEST supports a selected currently open IPO without claiming it opens today.

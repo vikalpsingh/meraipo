@@ -142,3 +142,65 @@ it('requires response review before queuing GPT text to X', async () => {
     '/api/v1/admin/x/manual-test/publish',
   ]);
 });
+
+it('generates a market content test with the schedule disabled and shows review actions', async () => {
+  let generated = false;
+  const post = {
+    id: 'market-test',
+    kind: 'MARKET_TEST',
+    status: 'DRAFT',
+    content: 'Market summary #StockMarket',
+    evidence: { facts: [] },
+    attempts: 0,
+    created_at: '2026-11-25T03:15:00Z',
+  };
+  const fetcher = vi.fn().mockImplementation(async (url) => ({
+    ok: true,
+    json: async () => {
+      if (url.endsWith('/content-test')) {
+        generated = true;
+        return { test_id: post.id, message: 'Draft ready' };
+      }
+      return { ...overview, openai_configured: true, posts: generated ? [post] : [] };
+    },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: "1. Generate today's market update · test" }),
+  );
+  expect(await screen.findByRole('region', { name: 'Generated content test' })).toHaveTextContent(
+    'Market summary #StockMarket',
+  );
+  expect(screen.getByRole('button', { name: 'Publish test content to X' })).toBeDisabled();
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/v1/admin/x/content-test',
+    expect.objectContaining({ body: JSON.stringify({ kind: 'MARKET_DAILY' }) }),
+  );
+});
+
+it('submits the chosen currently open IPO for an image test', async () => {
+  const fetcher = vi.fn().mockImplementation(async (_url, options) => ({
+    ok: true,
+    json: async () =>
+      options?.method === 'POST'
+        ? { message: 'Generated' }
+        : { ...overview, test_ipos: [{ id: 'open-ipo', name: 'Current company' }] },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<XControlCenter csrf="csrf-token" />);
+  fireEvent.change(await screen.findByLabelText('Currently open IPO for test'), {
+    target: { value: 'open-ipo' },
+  });
+  fireEvent.click(
+    screen.getByRole('button', { name: '1. Generate selected IPO content and image · test' }),
+  );
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/v1/admin/x/content-test',
+      expect.objectContaining({
+        body: JSON.stringify({ kind: 'IPO_OPENING', ipo_id: 'open-ipo' }),
+      }),
+    ),
+  );
+});

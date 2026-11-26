@@ -48,6 +48,22 @@ def configured():
 async def overview(auth=Depends(admin), db=Depends(get_session)):
     a = await service.account(db)
     rows = (await db.scalars(select(m.XPost).order_by(m.XPost.created_at.desc()).limit(50))).all()
+    today = m.now().astimezone(service.IST).date()
+    test_ipos = (
+        await db.execute(
+            select(m.IPO.id, m.Company.name)
+            .join(m.Company, m.Company.id == m.IPO.company_id)
+            .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
+            .where(
+                m.Company.is_demo.is_(False),
+                m.IPO.status.in_(["OPEN", "UPCOMING"]),
+                m.IPODate.open_date <= today,
+                m.IPODate.close_date >= today,
+            )
+            .order_by(m.Company.name)
+            .limit(200)
+        )
+    ).all()
     await db.commit()
     return {
         "schedules": service.schedules(a),
@@ -59,6 +75,7 @@ async def overview(auth=Depends(admin), db=Depends(get_session)):
         "error": a.error_code,
         "monthly_limit": settings().x_monthly_post_limit,
         "daily_limit": settings().x_daily_attempt_limit,
+        "test_ipos": [{"id": row.id, "name": row.name} for row in test_ipos],
         "posts": [
             {
                 "has_image": bool(row.image_png),
@@ -219,7 +236,7 @@ async def market_auto(data: AutoInput, auth=Depends(admin), db=Depends(get_sessi
             if not a.tokens or not await db.scalar(
                 select(m.XPost.id)
                 .where(
-                    m.XPost.kind == "MARKET_DAILY",
+                    m.XPost.kind.in_(["MARKET_DAILY", "MARKET_TEST"]),
                     m.XPost.status == "PUBLISHED",
                     m.XPost.approved_at.is_not(None),
                 )
@@ -241,6 +258,35 @@ async def market_auto(data: AutoInput, auth=Depends(admin), db=Depends(get_sessi
 
 class GenerateInput(BaseModel):
     kind: Literal["MARKET_DAILY", "IPO_OPENING", "IPO_CLOSING"]
+
+
+class ContentTestInput(BaseModel):
+    kind: Literal["MARKET_DAILY", "IPO_OPENING"]
+    ipo_id: str | None = Field(default=None, max_length=36)
+
+
+@router.post("/content-test")
+async def content_test(data: ContentTestInput, auth=Depends(admin), db=Depends(get_session)):
+    configured()
+    if data.kind == "IPO_OPENING" and not data.ipo_id:
+        raise HTTPException(422, "Choose a currently open IPO.")
+    if data.kind == "MARKET_DAILY" and not settings().openai_api_key.get_secret_value():
+        raise HTTPException(409, "OPENAI_NOT_CONFIGURED")
+    async with service.operation_lock():
+        row = await service.generate_test(
+            db, data.kind, data.ipo_id if data.kind == "IPO_OPENING" else None
+        )
+        audit(db, auth, "content_test", row.id)
+        await db.commit()
+    return {
+        "test_id": row.id,
+        "message": row.error_code
+        or (
+            "SKIP_POST: no post will be sent. See the saved explanation."
+            if row.status == "SKIPPED"
+            else "Test content loaded. Review the text, sources and image, then Approve and Publish now. This can create a real public X post."
+        ),
+    }
 
 
 class ManualDraftInput(BaseModel):

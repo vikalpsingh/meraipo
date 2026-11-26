@@ -38,7 +38,7 @@ def due(config, now):
     return config["enabled"] and 0 <= elapsed < 60
 
 
-async def opening_image(db, ipo_id, closing=False):
+async def opening_image(db, ipo_id, closing=False, current=False):
     from packages.shared.email_template import content
 
     item = await content(
@@ -48,6 +48,7 @@ async def opening_image(db, ipo_id, closing=False):
         "",
         opening=True,
         closing=closing,
+        current=current,
         inline_attachment=True,
     )
     return item["chart_png"]
@@ -57,12 +58,18 @@ async def validate_post(db, row):
     now = m.now()
     if row.trading_date != now.astimezone(IST).date():
         raise x_api.XError("DRAFT_EXPIRED")
-    if row.kind != "MANUAL" and not trading_day(await load_market_settings(db), row.trading_date):
+    if row.kind not in ("MANUAL", "MARKET_DAILY", "MARKET_TEST") and not trading_day(
+        await load_market_settings(db), row.trading_date
+    ):
         raise x_api.XError("NON_TRADING_DAY")
+    if row.kind in ("MARKET_DAILY", "MARKET_TEST"):
+        trading_day(await load_market_settings(db), row.trading_date)  # Validate calendar coverage.
+        if row.trading_date.weekday() >= 5:
+            raise x_api.XError("NON_TRADING_DAY")
     a = await account(db)
     if row.kind in DEFAULT_SCHEDULES and not schedules(a)[row.kind]["enabled"]:
         raise x_api.XError("POST_TYPE_DISABLED")
-    if row.kind == "MARKET_DAILY":
+    if row.kind in ("MARKET_DAILY", "MARKET_TEST"):
         from datetime import datetime
 
         stamp = datetime.fromisoformat(row.evidence["generated_at"])
@@ -71,6 +78,12 @@ async def validate_post(db, row):
         # Evidence is model-selected; automation requires a separate tested opt-in.
         if not row.evidence.get("facts"):
             raise x_api.XError("AI_INSUFFICIENT_EVIDENCE")
+    elif row.kind == "IPO_TEST":
+        text, _ = await public_ipo_snapshot(db, row.evidence.get("ipo_id"), current=True)
+        if text != row.content or await quote_key(db, row.evidence["ipo_id"]) != row.evidence.get(
+            "quote_key"
+        ):
+            raise x_api.XError("SOURCE_CHANGED_REGENERATE")
     elif row.kind != "MANUAL":
         text, _ = await snapshot(
             db, row.evidence.get("ipo_id"), row.kind == "IPO_OPENING", row.kind == "IPO_CLOSING"
@@ -112,7 +125,8 @@ async def generate_scheduled(db, kind, manual=False):
     config = schedules(a)[kind]
     if not config["enabled"] or (not manual and not due(config, local)):
         return []
-    if not trading_day(await load_market_settings(db), local.date()):
+    is_trading = trading_day(await load_market_settings(db), local.date())
+    if local.weekday() >= 5 or (kind != "MARKET_DAILY" and not is_trading):
         return []
     ids = (
         [None]
@@ -176,7 +190,10 @@ async def generate_scheduled(db, kind, manual=False):
         await db.commit()  # Reserve before any paid request; interrupted work is not retried.
         try:
             if kind == "MARKET_DAILY":
-                text, evidence = await market_research.generate(now)
+                from packages.shared.market_config import market_settings_context
+
+                async with market_settings_context(db):
+                    text, evidence = await market_research.generate(now)
             else:
                 text, evidence = await snapshot(
                     db, ipo_id, opening=kind == "IPO_OPENING", closing=kind == "IPO_CLOSING"
@@ -186,14 +203,13 @@ async def generate_scheduled(db, kind, manual=False):
                 evidence["quote_key"] = await quote_key(db, ipo_id)
                 if before != evidence["quote_key"]:
                     raise x_api.XError("GMP_CHANGED_REGENERATE")
-            row.content, row.evidence = text, evidence
-            row.content_hash = hashlib.sha256(text.encode()).hexdigest()
+            await assign_content(db, row, text, evidence)
             can_auto = (
                 not manual
                 and a.auto_publish
                 and (kind in ("IPO_OPENING", "IPO_CLOSING") or config.get("auto_publish", False))
             )
-            row.status = "QUEUED" if can_auto else "DRAFT"
+            row.status = "SKIPPED" if text == "SKIP_POST" else "QUEUED" if can_auto else "DRAFT"
         except x_api.XError as exc:
             row.status, row.error_code = "BLOCKED", exc.code
             row.api_status, row.request_id = exc.status, exc.request_id
@@ -202,6 +218,68 @@ async def generate_scheduled(db, kind, manual=False):
         result.append(row)
         break
     return result
+
+
+async def assign_content(db, row, text, evidence):
+    row.content, row.evidence = text, evidence
+    if text == "SKIP_POST":
+        row.content_hash = None
+        return
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    duplicate = await db.scalar(
+        select(m.XPost.id).where(m.XPost.content_hash == digest, m.XPost.id != row.id).limit(1)
+    )
+    if duplicate:
+        error = x_api.XError("DUPLICATE_CONTENT_REVIEW_EXISTING_POST")
+        error.review = {
+            "duplicate_post_id": duplicate,
+            "reason": "Identical content already exists. Review that post instead of sending a duplicate.",
+        }
+        raise error
+    row.content_hash = digest
+
+
+async def generate_test(db, kind, ipo_id=None):
+    """One paid market test per day; IPO tests are isolated from event schedules."""
+    from packages.providers import market_research
+    from packages.shared.market_config import market_settings_context
+
+    now = m.now()
+    day = now.astimezone(IST).date()
+    test_kind = "MARKET_TEST" if kind == "MARKET_DAILY" else "IPO_TEST"
+    key = f"{test_kind}:{day}:{ipo_id if test_kind == 'IPO_TEST' else 'market'}"
+    row = await db.scalar(select(m.XPost).where(m.XPost.dedupe_key == key))
+    if row:
+        return row
+    row = m.XPost(
+        kind=test_kind,
+        trading_date=day,
+        dedupe_key=key,
+        status="GENERATING",
+        content="",
+        evidence={},
+    )
+    db.add(row)
+    await db.commit()
+    try:
+        if test_kind == "MARKET_TEST":
+            async with market_settings_context(db):
+                text, evidence = await market_research.generate(now)
+        else:
+            text, evidence = await public_ipo_snapshot(db, ipo_id, current=True)
+            before = await quote_key(db, ipo_id)
+            row.image_png = await opening_image(db, ipo_id, current=True)
+            evidence["quote_key"] = await quote_key(db, ipo_id)
+            if before != evidence["quote_key"]:
+                raise x_api.XError("GMP_CHANGED_REGENERATE")
+        await assign_content(db, row, text, {**evidence, "test": True})
+        row.status = "SKIPPED" if text == "SKIP_POST" else "DRAFT"
+    except x_api.XError as exc:
+        row.status, row.error_code = "BLOCKED", exc.code
+        row.evidence = getattr(exc, "review", {})
+        row.api_status, row.request_id = exc.status, exc.request_id
+    await db.commit()
+    return row
 
 
 @asynccontextmanager
@@ -225,10 +303,10 @@ async def operation_lock():
 
 
 def weighted_length(text):
-    # Conservative upper bound: URLs cost at least 23; non-ASCII costs two.
+    # t.co URLs cost 23; conservative Unicode weighting never understates emoji sequences.
     parts = re.split(r"(https://[^\s]+)", text)
     return sum(
-        max(23, len(p)) if p.startswith("https://") else sum(1 if ord(ch) < 128 else 2 for ch in p)
+        23 if p.startswith("https://") else sum(1 if ord(ch) < 128 else 2 for ch in p)
         for p in parts
     )
 
@@ -254,7 +332,7 @@ async def account(db):
     return await db.get(m.XAccount, "meraipo", populate_existing=True)
 
 
-async def public_ipo_review(db, ipo, dates, closing=False):
+async def public_ipo_review(db, ipo, dates, closing=False, current=False):
     """Use published feed provenance, never an administrator's guide approval."""
     now = m.now()
     day = now.astimezone(IST).date()
@@ -289,14 +367,14 @@ async def public_ipo_review(db, ipo, dates, closing=False):
         "Application dates valid": bool(
             dates.open_date and dates.close_date and dates.open_date <= day <= dates.close_date
         ),
-        "Event is today": (dates.close_date if closing else dates.open_date) == day,
+        "Event is today": current or (dates.close_date if closing else dates.open_date) == day,
         "Not cancelled or postponed": (ipo.raw_status or "").upper()
         not in ("CANCELLED", "POSTPONED", "WITHDRAWN"),
     }
     return checks, source
 
 
-async def public_ipo_snapshot(db, ipo_id, closing=False):
+async def public_ipo_snapshot(db, ipo_id, closing=False, current=False):
     now = m.now()
     day = now.astimezone(IST).date()
     if not trading_day(await load_market_settings(db), day):
@@ -310,7 +388,7 @@ async def public_ipo_snapshot(db, ipo_id, closing=False):
         )
     ).all()
     for ipo, dates, company in rows:
-        checks, source = await public_ipo_review(db, ipo, dates, closing)
+        checks, source = await public_ipo_review(db, ipo, dates, closing, current)
         if not all(checks.values()):
             error = x_api.XError("IPO_PUBLIC_SOURCE_NOT_READY")
             error.review = {
@@ -321,7 +399,7 @@ async def public_ipo_snapshot(db, ipo_id, closing=False):
             raise error
         name = " ".join(company.name.split()).replace("@", "").replace("#", "")[:80]
         text = (
-            f"IPO {'closes' if closing else 'opens'} today | {day:%d %b %Y}\n{name}\n"
+            f"{'IPO open for subscription' if current else 'IPO closes today' if closing else 'IPO opens today'} | {day:%d %b %Y}\n{name}\n"
             f"Applications: {dates.open_date:%d %b}–{dates.close_date:%d %b}.\n"
             f"https://www.meraipo.com/ipo/{company.slug}\nPublic-feed reminder. GMP unofficial; returns not guaranteed."
         )
@@ -333,7 +411,7 @@ async def public_ipo_snapshot(db, ipo_id, closing=False):
             "source_timestamp": ipo.source_timestamp.isoformat(),
             "generated_at": now.isoformat(),
             "policy": "public_feed",
-            "event": "closing" if closing else "opening",
+            "event": "current" if current else "closing" if closing else "opening",
         }
     raise x_api.XError("NO_OPENING_OR_CLOSING_IPO")
 
@@ -436,7 +514,7 @@ async def publish(db, key):
     if not row or row.status not in ("APPROVED", "QUEUED"):
         raise x_api.XError("APPROVAL_REQUIRED")
     if not row.approved_at and (
-        row.kind == "MANUAL"
+        row.kind in ("MANUAL", "MARKET_TEST", "IPO_TEST")
         or not a.auto_publish
         or (
             row.kind == "MARKET_DAILY"

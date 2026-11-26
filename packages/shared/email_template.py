@@ -84,6 +84,7 @@ async def content(
     inline_attachment=False,
     test_category=None,
     closing=False,
+    current=False,
 ):
     ipo = await db.get(m.IPO, ipo_id)
     if not ipo:
@@ -248,6 +249,7 @@ async def content(
             rendered_at.astimezone(IST).strftime("%d %b %Y %H:%M IST"),
             (dates.close_date if closing else dates.open_date) if dates else "Unconfirmed",
             closing=closing,
+            current=current,
         )
         src = (
             "cid:ipo-price-chart"

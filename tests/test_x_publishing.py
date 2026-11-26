@@ -32,7 +32,7 @@ def test_market_research_rejects_missing_sources_dates_and_length():
     url = "https://www.nseindia.com/market-data"
     result = {
         "ready": True,
-        "text": "Markets 18 Nov: prior close snapshot.",
+        "text": "Markets 18 Nov: prior close snapshot. #StockMarket",
         "facts": [{"claim": "Prior close", "as_of": "2026-11-17T10:00:00Z", "url": url}],
         "reason": "",
     }
@@ -44,7 +44,7 @@ def test_market_research_rejects_missing_sources_dates_and_length():
         ],
     }
     text, evidence = validate_result(payload, now)
-    assert url in text and evidence["review_required"]
+    assert url not in text and evidence["facts"][0]["url"] == url and evidence["review_required"]
     for bad in ("2026-11-01T10:00:00Z", "2026-11-19T10:00:00Z", "2026-11-17T10:00:00"):
         result["facts"][0]["as_of"] = bad
         payload["output"][1]["content"][0]["text"] = json.dumps(result)
@@ -407,11 +407,10 @@ def test_blocked_market_retains_review_only_explanation():
             }
         ],
     }
-    with pytest.raises(x_api.XError) as caught:
-        validate_result(payload, datetime.now(timezone.utc))
-    assert caught.value.code == "AI_INSUFFICIENT_EVIDENCE"
-    assert caught.value.review["reason"] == "No dated exchange evidence"
-    assert caught.value.review["review_only"] is True
+    text, evidence = validate_result(payload, datetime.now(timezone.utc))
+    assert text == "SKIP_POST"
+    assert evidence["reason"] == "No dated exchange evidence"
+    assert evidence["review_only"] is True
 
 
 async def test_review_includes_ipo_with_unverified_guide(db, draft_setup):
@@ -599,3 +598,216 @@ def test_openai_429_classification(provider_code, expected):
     )
     assert error.code == expected and error.status == 429
     assert "private" not in str(error)
+
+
+async def test_current_ipo_test_disabled_schedule_and_dedup(db, draft_setup):
+    _, ipo, account = draft_setup
+    dates = await db.scalar(select(m.IPODate).where(m.IPODate.ipo_id == ipo.id))
+    dates.open_date = m.now().date() - timedelta(days=1)
+    account.auto_publish = True
+    account.schedules = {}
+    await db.commit()
+    row = await service.generate_test(db, "IPO_OPENING", ipo.id)
+    assert row.status == "DRAFT" and row.kind == "IPO_TEST"
+    assert "open for subscription" in row.content and "opens today" not in row.content
+    assert row.image_png.startswith(b"\x89PNG")
+    assert (await service.generate_test(db, "IPO_OPENING", ipo.id)).id == row.id
+    await service.validate_post(db, row)
+    row.status = "QUEUED"
+    await db.commit()
+    with pytest.raises(x_api.XError, match="APPROVAL_REQUIRED"):
+        await service.publish(db, row.id)
+
+
+async def test_market_test_has_separate_budget_and_never_autopublishes(
+    db, draft_setup, monkeypatch
+):
+    from packages.providers import market_research
+
+    _, _, account = draft_setup
+    account.auto_publish = True
+    await db.commit()
+    research = AsyncMock(
+        return_value=(
+            "Prior close summary #StockMarket",
+            {"facts": [{"claim": "Prior close"}], "generated_at": m.now().isoformat()},
+        )
+    )
+    monkeypatch.setattr(market_research, "generate", research)
+    row = await service.generate_test(db, "MARKET_DAILY")
+    assert row.kind == "MARKET_TEST" and row.status == "DRAFT"
+    assert (await service.generate_test(db, "MARKET_DAILY")).id == row.id
+    assert research.await_count == 1
+    await service.validate_post(db, row)
+
+
+async def test_market_weekend_skip_without_api(monkeypatch):
+    from packages.providers import market_research
+
+    monkeypatch.setattr(settings(), "openai_api_key", SecretStr("test"))
+    text, evidence = await market_research.generate(
+        datetime(2026, 11, 21, 3, 0, tzinfo=timezone.utc)
+    )
+    assert text == "SKIP_POST" and evidence["reason"] == "Weekend"
+
+
+async def test_market_holiday_and_closing_prompt_context(monkeypatch):
+    import httpx
+
+    from packages.providers import market_research
+
+    config = settings()
+    monkeypatch.setattr(config, "openai_api_key", SecretStr("test"))
+    monkeypatch.setattr(config, "trading_calendar_year", 2026)
+    monkeypatch.setattr(config, "trading_holidays", "2026-11-24")
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    client = Client()
+    client.post = AsyncMock(return_value=httpx.Response(200, json={}))
+    monkeypatch.setattr(market_research.httpx, "AsyncClient", lambda **kw: client)
+    monkeypatch.setattr(market_research, "validate_result", lambda payload, now: ("SKIP_POST", {}))
+    await market_research.generate(datetime(2026, 11, 24, 3, 15, tzinfo=timezone.utc))
+    body = client.post.call_args.kwargs["json"]
+    assert "Phase: holiday" in body["input"] and "+05:30" in body["input"]
+    assert "No individual company names, URLs, citations" in body["instructions"]
+    await market_research.generate(datetime(2026, 11, 25, 10, 30, tzinfo=timezone.utc))
+    assert "Phase: closing" in client.post.call_args.kwargs["json"]["input"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Market #StockMarket https://example.com",
+        "Market #StockMarket #Nifty",
+        "Market update",
+        "**Market** #StockMarket",
+        "📊" * 140 + " #StockMarket",
+    ],
+)
+def test_market_public_format_rejects_links_hashtags_markdown_and_length(text):
+    import json
+
+    from packages.providers.market_research import validate_result
+
+    url = "https://www.nseindia.com/market-data"
+    now = datetime(2026, 11, 25, 3, 15, tzinfo=timezone.utc)
+    body = {
+        "ready": True,
+        "text": text,
+        "reason": "",
+        "facts": [{"claim": "Prior close", "as_of": "2026-11-23T10:00:00Z", "url": url}],
+    }
+    payload = {
+        "status": "completed",
+        "output": [
+            {"type": "web_search_call", "action": {"sources": [{"url": url}]}},
+            {"type": "message", "content": [{"type": "output_text", "text": json.dumps(body)}]},
+        ],
+    }
+    with pytest.raises(x_api.XError):
+        validate_result(payload, now)
+
+
+async def test_content_test_api_selected_ipo_and_skip_not_publishable(
+    admin_client, db, draft_setup, monkeypatch
+):
+    from contextlib import asynccontextmanager
+
+    from apps.api import x_routes
+    from packages.providers import market_research
+
+    _, ipo, _ = draft_setup
+
+    @asynccontextmanager
+    async def lock():
+        yield
+
+    monkeypatch.setattr(service, "operation_lock", lock)
+    monkeypatch.setattr(x_routes, "configured", lambda: settings())
+    response = await admin_client.post(
+        "/api/v1/admin/x/content-test", json={"kind": "IPO_OPENING", "ipo_id": ipo.id}
+    )
+    assert response.status_code == 200
+    row = await db.get(m.XPost, response.json()["test_id"])
+    assert row.kind == "IPO_TEST" and row.evidence["ipo_id"] == ipo.id
+    monkeypatch.setattr(settings(), "openai_api_key", SecretStr("test"))
+    monkeypatch.setattr(
+        market_research,
+        "generate",
+        AsyncMock(return_value=("SKIP_POST", {"reason": "No reliable core data", "facts": []})),
+    )
+    response = await admin_client.post(
+        "/api/v1/admin/x/content-test", json={"kind": "MARKET_DAILY"}
+    )
+    key = response.json()["test_id"]
+    assert (await db.get(m.XPost, key)).status == "SKIPPED"
+    assert (await admin_client.post(f"/api/v1/admin/x/{key}/approve")).status_code == 409
+    assert (await admin_client.post(f"/api/v1/admin/x/{key}/publish")).status_code == 409
+
+
+@pytest.mark.parametrize("prior_status", ["PUBLISHED", "UNCERTAIN", "SENDING"])
+async def test_cross_flow_duplicate_content_not_sent(db, draft_setup, monkeypatch, prior_status):
+    from packages.providers import market_research
+
+    prior, _, _ = draft_setup
+    prior.status = prior_status
+    await db.commit()
+    research = AsyncMock(
+        return_value=(
+            prior.content,
+            {"facts": [{"claim": "prior"}], "generated_at": m.now().isoformat()},
+        )
+    )
+    monkeypatch.setattr(market_research, "generate", research)
+    row = await service.generate_test(db, "MARKET_DAILY")
+    assert row.status == "BLOCKED"
+    assert row.error_code == "DUPLICATE_CONTENT_REVIEW_EXISTING_POST"
+    assert row.evidence["duplicate_post_id"] == prior.id
+    assert row.attempts == 0
+
+
+async def test_market_skip_repeats_on_another_day_without_hash_conflict(
+    db, draft_setup, monkeypatch
+):
+    from packages.providers import market_research
+
+    now = m.now()
+    monkeypatch.setattr(
+        market_research,
+        "generate",
+        AsyncMock(return_value=("SKIP_POST", {"reason": "No data", "facts": []})),
+    )
+    first = await service.generate_test(db, "MARKET_DAILY")
+    monkeypatch.setattr(m, "now", lambda: now + timedelta(days=1))
+    second = await service.generate_test(db, "MARKET_DAILY")
+    assert first.id != second.id and first.status == second.status == "SKIPPED"
+    assert first.content_hash is None and second.content_hash is None
+
+
+async def test_successful_approved_market_test_unlocks_opt_in(
+    admin_client, db, draft_setup, monkeypatch
+):
+    from contextlib import asynccontextmanager
+
+    from apps.api import x_routes
+
+    @asynccontextmanager
+    async def lock():
+        yield
+
+    monkeypatch.setattr(service, "operation_lock", lock)
+    monkeypatch.setattr(x_routes, "configured", lambda: settings())
+    row, _, _ = draft_setup
+    row.kind = "MARKET_TEST"
+    row.status = "PUBLISHED"
+    row.approved_at = m.now()
+    await db.commit()
+    response = await admin_client.post("/api/v1/admin/x/market-auto", json={"enabled": True})
+    assert response.status_code == 200
+    assert service.schedules(await service.account(db))["MARKET_DAILY"]["auto_publish"] is True

@@ -6,7 +6,7 @@ from textwrap import wrap
 from PIL import Image, ImageDraw, ImageFont
 
 
-def render(name, price, premium, stamp, opening_date, closing=False):
+def render(name, price, premium, stamp, opening_date, closing=False, current=False):
     image = Image.new("RGB", (1200, 630), "#103c3d")
     draw = ImageDraw.Draw(image)
 
@@ -16,14 +16,23 @@ def render(name, price, premium, stamp, opening_date, closing=False):
     label(
         54,
         34,
-        "MERAIPO  /  LAST APPLICATION DAY" if closing else "MERAIPO  /  OPENING DAY",
+        "MERAIPO  /  OPEN FOR SUBSCRIPTION"
+        if current
+        else "MERAIPO  /  LAST APPLICATION DAY"
+        if closing
+        else "MERAIPO  /  OPENING DAY",
         26,
         "#77e1bb",
     )
     for i, line in enumerate(wrap(name, width=43)[:2]):
         label(54, 94 + i * 46, line, 38)
     label(
-        54, 202, ("Closes " if closing else "Opens ") + str(opening_date) + "  |  meraipo.com", 25
+        54,
+        202,
+        ("Opened " if current else "Closes " if closing else "Opens ")
+        + str(opening_date)
+        + "  |  meraipo.com",
+        25,
     )
     draw.rounded_rectangle((44, 254, 1156, 480), radius=18, fill="#1c5050")
     label(70, 278, "IPO upper band", 24, "#b4d8d0")
