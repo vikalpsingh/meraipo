@@ -154,13 +154,23 @@ async def test_thousand_recipients_render_once_and_resume(db, reminders, monkeyp
     assert not await email_digest.digest_is_current(db, campaign, subscriber)
 
 
+@pytest.mark.parametrize("feed_only", [False, True])
 async def test_fixed_recipient_full_outbox_and_preferences_unchanged(
-    admin_client, db, reminders, monkeypatch
+    admin_client, db, reminders, monkeypatch, feed_only
 ):
     from apps.api import email_admin
     from apps.worker import email_alerts
     from packages.shared.market_config import encrypt_secret
 
+    if feed_only:
+        for ipo, _dates, guide in reminders[0]:
+            await db.delete(guide)
+            ipo.source_provider, ipo.source_timestamp, ipo.quality = (
+                "IPOALERTS",
+                m.now(),
+                "UNVERIFIED",
+            )
+        await db.commit()
     monkeypatch.setattr(email_admin, "require_test_sender", AsyncMock())
     address = "meshanti.singh@gmail.com"
     sub = m.EmailSubscriber(
@@ -241,3 +251,93 @@ def test_application_schedule_migration_preserves_enable_flag():
                 == 0
             )
     engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "mode,expected_all,expected_gold", [("opening", 1, 0), ("closing", 1, 1), ("both", 2, 1)]
+)
+async def test_imported_ipos_without_guides_queue_and_send_by_category(
+    db, reminders, monkeypatch, mode, expected_all, expected_gold
+):
+    from apps.worker import email_alerts
+    from packages.shared.market_config import encrypt_secret
+
+    rows, now = reminders
+    for ipo, _dates, guide in rows:
+        await db.delete(guide)
+        ipo.source_provider = "IPOALERTS"
+        ipo.source_timestamp = m.now()
+        ipo.quality = "UNVERIFIED"
+    db.add(m.FeatureFlag(key="email_alerts", enabled=True))
+    state = await control(db)
+    state.sending_enabled = True
+    state.application_schedule = {"mode": mode, "time": "08:30"}
+    for name, band, confirmed, unsubscribed in [
+        ("all", "white", True, False),
+        ("gold", "gold", True, False),
+        ("pending", "white", False, False),
+        ("unsubscribed", "white", True, True),
+    ]:
+        db.add(
+            m.EmailSubscriber(
+                email_hash=name,
+                email_encrypted=encrypt_secret(name + "@example.com"),
+                consent_at=m.now(),
+                verified_at=m.now() if confirmed else None,
+                unsubscribed_at=m.now() if unsubscribed else None,
+                gmp_band=band,
+            )
+        )
+    await db.commit()
+    assert await email_alerts.prepare(db) is None
+    await email_alerts.prepare(db)
+    all_campaign = await db.scalar(
+        select(m.EmailCampaign).where(m.EmailCampaign.kind == "digest_white")
+    )
+    gold_campaign = await db.scalar(
+        select(m.EmailCampaign).where(m.EmailCampaign.kind == "digest_gold")
+    )
+    assert len(all_campaign.digest_payload["ipo_ids"]) == expected_all
+    assert len(gold_campaign.digest_payload["ipo_ids"]) == expected_gold
+    deliveries = (await db.scalars(select(m.EmailDelivery))).all()
+    assert len(deliveries) == 1 + bool(expected_gold)
+    sent = []
+    monkeypatch.setattr(email_alerts, "ses_send", lambda *args: sent.append(args) or "mock-ses-id")
+    for row in deliveries:
+        await email_alerts.send_one(db, row.id, approved=True)
+        await email_alerts.send_one(db, row.id, approved=True)
+    assert len(sent) == len(deliveries)
+    assert {item[0] for item in sent} == (
+        {"all@example.com", "gold@example.com"} if expected_gold else {"all@example.com"}
+    )
+    assert all(
+        "Unsubscribe" in item[2] and email_digest.UNSUBSCRIBE not in item[2] for item in sent
+    )
+
+
+@pytest.mark.parametrize(
+    "problem", ["stale", "future", "unknown_provider", "conflict", "cancelled"]
+)
+async def test_feed_reminders_reject_bad_source_and_report_blocker(db, reminders, problem):
+    from apps.worker.email_alerts import prepare
+
+    rows, now = reminders
+    db.add(m.FeatureFlag(key="email_alerts", enabled=True))
+    for ipo, _dates, guide in rows:
+        await db.delete(guide)
+        ipo.source_provider = "IPOALERTS"
+        ipo.source_timestamp = m.now()
+        ipo.quality = "UNVERIFIED"
+        if problem == "stale":
+            ipo.source_timestamp = m.now() - timedelta(hours=49)
+        if problem == "future":
+            ipo.source_timestamp = m.now() + timedelta(minutes=1)
+        if problem == "unknown_provider":
+            ipo.source_provider = "UNTRUSTED"
+        if problem == "conflict":
+            ipo.quality = "CONFLICT"
+        if problem == "cancelled":
+            ipo.raw_status = "CANCELLED"
+    await db.commit()
+    assert await prepare(db) == "IPO_REMINDER_SOURCE_NOT_READY"
+    assert await db.scalar(select(func.count()).select_from(m.EmailDelivery)) == 0

@@ -54,7 +54,7 @@ async def prepare(db):
             select(m.IPO, m.IPODate, m.ApplicantGuide)
             .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
             .join(m.Company, m.Company.id == m.IPO.company_id)
-            .join(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
+            .outerjoin(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
             .where(
                 (m.IPODate.listing_date == today.date() + timedelta(days=1))
                 | (m.IPODate.open_date == today.date())
@@ -63,6 +63,16 @@ async def prepare(db):
             )
         )
     ).all()
+    due = [
+        (ipo, dates, guide)
+        for ipo, dates, guide in listings
+        if (schedule["mode"] in ("opening", "both") and dates.open_date == today.date())
+        or (schedule["mode"] in ("closing", "both") and dates.close_date == today.date())
+    ]
+    blocked = bool(due) and not any(
+        email_schedule.occasion(ipo, dates, guide, today.date(), schedule["mode"])
+        for ipo, dates, guide in due
+    )
     await prepare_digests(db, listings, today)
     for ipo, dates, guide in listings:
         if eligible_opening(ipo, dates, guide, today.date()):
@@ -146,6 +156,7 @@ async def prepare(db):
                 .on_conflict_do_nothing(index_elements=["subscriber_id", "campaign_id"])
             )
     await db.commit()
+    return "IPO_REMINDER_SOURCE_NOT_READY" if blocked else None
 
 
 async def maintain_outbox(db):
@@ -529,7 +540,7 @@ def email_tick():
                 state, checks = await production_checks(db)
                 approved = state.sending_enabled and checks["ready"]
                 if approved:
-                    await prepare(db)
+                    job.error_code = await prepare(db)
                 allowed = (
                     ["TEST"]
                     + (["VERIFY"] if await feature_enabled(db) else [])

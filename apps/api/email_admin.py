@@ -213,7 +213,7 @@ async def application_test(auth=Depends(admin), db=Depends(get_session)):
             select(m.IPO, m.IPODate, m.ApplicantGuide)
             .join(m.IPODate, m.IPODate.ipo_id == m.IPO.id)
             .join(m.Company, m.Company.id == m.IPO.company_id)
-            .join(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
+            .outerjoin(m.ApplicantGuide, m.ApplicantGuide.ipo_id == m.IPO.id)
             .where(
                 m.Company.is_demo.is_(False),
                 (m.IPODate.open_date == today.date()) | (m.IPODate.close_date == today.date()),
@@ -225,7 +225,7 @@ async def application_test(auth=Depends(admin), db=Depends(get_session)):
     if not payload or not payload["ipo_ids"]:
         raise HTTPException(
             409,
-            "No verified IPO matches today's selected opening/closing schedule. Check dates and confirmed applicant guides. Nothing was sent.",
+            "No eligible IPO matches today's opening/closing schedule. Check issue dates, source freshness and data conflicts. Trusted feed records do not require an applicant guide. Nothing was sent.",
         )
     payload["subject"] = "TEST | MeraIPO application reminders"
     payload["text"] = (

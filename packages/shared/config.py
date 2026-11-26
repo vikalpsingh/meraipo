@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     email_batch_size: int = Field(default=20, ge=1, le=100)
     email_max_per_second: float = Field(default=1, gt=0, le=20)
     email_catchup_hours: int = Field(default=4, ge=1, le=12)
+    email_ipo_max_age_hours: int = Field(default=48, ge=1, le=72)
     email_max_attempts: int = Field(default=5, ge=1, le=10)
     email_unsubscribe_days: int = Field(default=400, ge=30, le=730)
     email_token_secret: SecretStr = SecretStr("")
